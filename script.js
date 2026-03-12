@@ -258,9 +258,7 @@ function onAction(data) {
     opponentAttackTactic = data.action_data.attack || "1-3-2";
     opponentDefenseTactic = data.action_data.defense || "1-3-2";
   }
-  if (data.action_type === "shot" && data.player_id === myId) {
-    pendingShot = false;
-  }
+  // pendingShot is cleared in onShotComplete after physics settle
 }
 
 function onSync(data) {
@@ -1099,6 +1097,7 @@ function onGoalScored(scoringPlayer) {
 
 function onShotComplete() {
   // Switch turns
+  pendingShot = false;
   currentTurn = currentTurn === 1 ? 2 : 1;
   gamePhase = "playing";
   updateTurnIndicator();
