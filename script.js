@@ -108,6 +108,7 @@ let selectedDisk = null;
 let dragStart = null;
 let dragCurrent = null;
 let animFrame = null;
+let roundShotCount = 0; // shots taken this round (first-shot goal = foul)
 
 // Tactic state
 let myAttackTactic = "1-3-2";
@@ -141,6 +142,7 @@ const tacticOverlay = document.getElementById("tacticOverlay");
 const tacticConfirm = document.getElementById("tacticConfirm");
 const tacticTimerEl = document.getElementById("tacticTimer");
 const goalOverlay = document.getElementById("goalOverlay");
+const foulOverlay = document.getElementById("foulOverlay");
 const winnerOverlay = document.getElementById("winnerOverlay");
 const winnerName = document.getElementById("winnerName");
 const winnerScoreEl = document.getElementById("winnerScore");
@@ -445,6 +447,7 @@ function resetRound() {
   selectedDisk = null;
   dragStart = null;
   dragCurrent = null;
+  roundShotCount = 0;
   gamePhase = "playing";
   updateTurnIndicator();
   updateActivePanel();
@@ -900,6 +903,7 @@ function executeShot(data) {
   var d = disks[data.diskIndex];
   d.vx = data.vx;
   d.vy = data.vy;
+  roundShotCount++;
 
   gamePhase = "animating";
   startPhysicsLoop();
@@ -1051,13 +1055,29 @@ function checkGoal() {
 }
 
 function onGoalScored(scoringPlayer) {
+  // First shot of the round scoring a goal is a foul
+  if (roundShotCount <= 1) {
+    gamePhase = "goal";
+    foulOverlay.classList.add("show");
+    broadcastBoardSnapshot();
+
+    setTimeout(function () {
+      foulOverlay.classList.remove("show");
+      // Give the turn to the other player, restart the round
+      var foulPlayer = currentTurn;
+      roundStarter = foulPlayer === 1 ? 2 : 1;
+      currentTurn = roundStarter;
+      resetRound();
+      broadcastBoardSnapshot();
+    }, 1500);
+    return;
+  }
+
   score[scoringPlayer - 1]++;
   updateScoreDisplay();
   gamePhase = "goal";
 
-  // Show goal overlay
   goalOverlay.classList.add("show");
-
   broadcastBoardSnapshot();
 
   setTimeout(function () {
