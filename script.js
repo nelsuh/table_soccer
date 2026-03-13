@@ -898,17 +898,28 @@ function onPointerUp(e) {
   var nx = dx / dist;
   var ny = dy / dist;
 
+  var vx = nx * power;
+  var vy = ny * power;
+
   var shotData = {
     diskIndex: selectedDisk,
-    vx: nx * power,
-    vy: ny * power,
+    vx: vx,
+    vy: vy,
     player: currentTurn
   };
 
   executeShot(shotData);
 
+  // Send normalized velocities to opponent so different screen sizes work
+  var netShotData = {
+    diskIndex: selectedDisk,
+    vx: vx / fieldW,
+    vy: vy / fieldH,
+    player: currentTurn
+  };
+
   pendingShot = true;
-  Usion.game.action("shot", shotData).catch(function () {
+  Usion.game.action("shot", netShotData).catch(function () {
     pendingShot = false;
     Usion.game.requestSync(0);
   });
@@ -926,8 +937,9 @@ function applyShot(data) {
   if (diskIdx === undefined || diskIdx < 0 || diskIdx >= disks.length) return;
   if (disks[diskIdx].player !== data.player) return;
 
-  disks[diskIdx].vx = data.vx;
-  disks[diskIdx].vy = data.vy;
+  // Velocities arrive normalized (fraction of field size), convert to local pixels
+  disks[diskIdx].vx = data.vx * fieldW;
+  disks[diskIdx].vy = data.vy * fieldH;
   roundShotCount++;
 
   gamePhase = "animating";
@@ -1282,10 +1294,13 @@ function applyRematchState(payload) {
 }
 
 // ── Snapshots ────────────────────────────────────────────
+// Snapshots use normalized coordinates (0-1) so different screen sizes stay in sync
 function getBoardSnapshot() {
   return {
-    disks: disks.map(function (d) { return { x: d.x, y: d.y, vx: d.vx, vy: d.vy, player: d.player, radius: d.radius }; }),
-    ball: { x: ball.x, y: ball.y, vx: ball.vx, vy: ball.vy, radius: ball.radius },
+    disks: disks.map(function (d) {
+      return { x: d.x / fieldW, y: d.y / fieldH, vx: d.vx / fieldW, vy: d.vy / fieldH, player: d.player };
+    }),
+    ball: { x: ball.x / fieldW, y: ball.y / fieldH, vx: ball.vx / fieldW, vy: ball.vy / fieldH },
     score: score.slice(),
     currentTurn: currentTurn,
     gamePhase: gamePhase,
@@ -1314,11 +1329,19 @@ function applyBoardSnapshot(snap) {
 
   if (Array.isArray(snap.disks)) {
     disks = snap.disks.map(function (d) {
-      return { x: d.x, y: d.y, vx: d.vx || 0, vy: d.vy || 0, player: d.player, radius: d.radius || DISK_RADIUS };
+      return {
+        x: d.x * fieldW, y: d.y * fieldH,
+        vx: (d.vx || 0) * fieldW, vy: (d.vy || 0) * fieldH,
+        player: d.player, radius: DISK_RADIUS
+      };
     });
   }
   if (snap.ball) {
-    ball = { x: snap.ball.x, y: snap.ball.y, vx: snap.ball.vx || 0, vy: snap.ball.vy || 0, radius: snap.ball.radius || BALL_RADIUS };
+    ball = {
+      x: snap.ball.x * fieldW, y: snap.ball.y * fieldH,
+      vx: (snap.ball.vx || 0) * fieldW, vy: (snap.ball.vy || 0) * fieldH,
+      radius: BALL_RADIUS
+    };
   }
   if (snap.score) score = snap.score.slice();
   if (snap.currentTurn) currentTurn = snap.currentTurn;
