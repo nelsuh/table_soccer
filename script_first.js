@@ -12,8 +12,6 @@ const STOP_THRESHOLD = 0.15;
 const WALL_BOUNCE = 0.7;
 const DISK_BOUNCE = 0.85;
 const BALL_BOUNCE = 0.9;
-const FIXED_TIMESTEP_MS = 1000 / 60;
-const SHOT_START_DELAY_MS = 120;
 
 // ── Formation definitions ────────────────────────────────
 // Positions as fractions of field [x: 0-1, y: 0-1] for bottom player (player 2)
@@ -138,9 +136,6 @@ let rematchRequested = false;
 let rematchState = "idle";
 let pendingShot = false;
 let snapshotPhysics = false; // true when physics is running from a received snapshot (not a local shot)
-let physicsAccumulator = 0;
-let lastPhysicsTime = 0;
-let scheduledShotTimer = null;
 
 // ── DOM Refs ─────────────────────────────────────────────
 const turnIndicator = document.getElementById("turnIndicator");
@@ -909,49 +904,32 @@ function onPointerUp(e) {
   var vx = nx * power;
   var vy = ny * power;
 
-  var startAt = Date.now() + SHOT_START_DELAY_MS;
-
   var shotData = {
     diskIndex: selectedDisk,
     vx: vx,
     vy: vy,
-    player: currentTurn,
-    startAt: startAt
+    player: currentTurn
   };
 
-  scheduleLocalShot(shotData);
+  executeShot(shotData);
 
   // Send normalized velocities to opponent so different screen sizes work
   var netShotData = {
     diskIndex: selectedDisk,
     vx: vx / fieldW,
     vy: vy / fieldH,
-    player: currentTurn,
-    startAt: startAt
+    player: currentTurn
   };
 
   pendingShot = true;
   Usion.game.action("shot", netShotData).catch(function () {
     pendingShot = false;
-    if (scheduledShotTimer) {
-      clearTimeout(scheduledShotTimer);
-      scheduledShotTimer = null;
-    }
     Usion.game.requestSync(0);
   });
 
   selectedDisk = null;
   dragStart = null;
   dragCurrent = null;
-}
-
-function scheduleLocalShot(data) {
-  if (scheduledShotTimer) clearTimeout(scheduledShotTimer);
-  var delay = Math.max(0, Number(data.startAt || 0) - Date.now());
-  scheduledShotTimer = setTimeout(function () {
-    scheduledShotTimer = null;
-    executeShot(data);
-  }, delay);
 }
 
 function applyShot(data) {
@@ -961,27 +939,18 @@ function applyShot(data) {
   if (diskIdx === undefined || diskIdx < 0 || diskIdx >= disks.length) return;
   if (disks[diskIdx].player !== data.player) return;
 
-  var startAt = Number(data.startAt || 0);
-  var delay = Math.max(0, startAt - Date.now());
+  // Velocities arrive normalized (fraction of field size), convert to local pixels
+  disks[diskIdx].vx = data.vx * fieldW;
+  disks[diskIdx].vy = data.vy * fieldH;
+  roundShotCount++;
 
-  setTimeout(function () {
-    if (data.player !== currentTurn) return;
-    if (diskIdx < 0 || diskIdx >= disks.length) return;
-    if (disks[diskIdx].player !== data.player) return;
-
-    // Velocities arrive normalized (fraction of field size), convert to local pixels
-    executeShot({
-      diskIndex: diskIdx,
-      vx: data.vx * fieldW,
-      vy: data.vy * fieldH,
-      player: data.player
-    });
-  }, delay);
+  snapshotPhysics = false;
+  gamePhase = "animating";
+  startPhysicsLoop();
 }
 
 function executeShot(data) {
   var d = disks[data.diskIndex];
-  if (!d) return;
   d.vx = data.vx;
   d.vy = data.vy;
   roundShotCount++;
@@ -997,38 +966,23 @@ var physicsRunning = false;
 function startPhysicsLoop() {
   if (physicsRunning) return;
   physicsRunning = true;
-  physicsAccumulator = 0;
-  lastPhysicsTime = performance.now();
-  animFrame = requestAnimationFrame(physicsStep);
+  physicsStep();
 }
 
-function physicsStep(now) {
+function physicsStep() {
   if (!physicsRunning) return;
 
-  var dt = now - lastPhysicsTime;
-  lastPhysicsTime = now;
-  if (dt > 50) dt = 50;
-  physicsAccumulator += dt;
+  updatePhysics();
+  render();
 
-  while (physicsAccumulator >= FIXED_TIMESTEP_MS) {
-    updatePhysics();
+  if (checkGoal()) return;
 
-    if (checkGoal()) {
-      render();
-      return;
-    }
-
-    if (allStopped()) {
-      physicsRunning = false;
-      onShotComplete();
-      render();
-      return;
-    }
-
-    physicsAccumulator -= FIXED_TIMESTEP_MS;
+  if (allStopped()) {
+    physicsRunning = false;
+    onShotComplete();
+    return;
   }
 
-  render();
   animFrame = requestAnimationFrame(physicsStep);
 }
 
