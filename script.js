@@ -110,6 +110,7 @@ let dragCurrent = null;
 let animFrame = null;
 let roundShotCount = 0; // shots taken this round (first-shot goal = foul)
 let goalScored = false; // guard to prevent multiple goal detections
+let foulActive = false; // true when a foul is being displayed
 
 // Tactic state
 let myAttackTactic = "1-3-2";
@@ -481,6 +482,7 @@ function resetRound() {
   dragCurrent = null;
   roundShotCount = 0;
   goalScored = false;
+  foulActive = false;
   gamePhase = "playing";
   updateTurnIndicator();
   updateActivePanel();
@@ -1096,13 +1098,15 @@ function onGoalScored(scoringPlayer) {
   // roundShotCount is 1 when the very first shot of the round scores
   if (roundShotCount === 1) {
     gamePhase = "goal";
+    foulActive = true;
     foulOverlay.classList.add("show");
     broadcastBoardSnapshot();
 
     setTimeout(function () {
       foulOverlay.classList.remove("show");
+      foulActive = false;
       // Give the turn to the other player, restart the round
-      var foulPlayer = roundStarter; // the player who started the round committed the foul
+      var foulPlayer = roundStarter;
       roundStarter = foulPlayer === 1 ? 2 : 1;
       currentTurn = roundStarter;
       resetRound();
@@ -1233,7 +1237,7 @@ function resetForRematch() {
   foulOverlay.classList.remove("show");
   winnerPlayAgain.textContent = "Rematch";
   winnerPlayAgain.disabled = false;
-  winnerPlayAgain.onclick = requestRematch;
+  _rematchAction = requestRematch;
 
   // Reset tactic selection UI
   document.querySelectorAll("#attackGrid .tactic-option").forEach(function (o, i) {
@@ -1246,22 +1250,28 @@ function resetForRematch() {
   showTacticSelection();
 }
 
+var _rematchAction = null;
+winnerPlayAgain.addEventListener("click", function () {
+  if (_rematchAction) _rematchAction();
+});
+
 function syncRematchUi() {
   if (gamePhase !== "ended") return;
   if (rematchState === "requested") {
     if (rematchRequested) {
       winnerPlayAgain.textContent = "Waiting...";
       winnerPlayAgain.disabled = true;
+      _rematchAction = null;
     } else {
       winnerPlayAgain.textContent = "Accept Rematch";
       winnerPlayAgain.disabled = false;
-      winnerPlayAgain.onclick = acceptRematch;
+      _rematchAction = acceptRematch;
     }
     return;
   }
   winnerPlayAgain.textContent = "Rematch";
   winnerPlayAgain.disabled = false;
-  winnerPlayAgain.onclick = requestRematch;
+  _rematchAction = requestRematch;
 }
 
 function applyRematchState(payload) {
@@ -1280,6 +1290,8 @@ function getBoardSnapshot() {
     currentTurn: currentTurn,
     gamePhase: gamePhase,
     roundStarter: roundStarter,
+    roundShotCount: roundShotCount,
+    foulActive: foulActive,
     rematchState: rematchState,
     version: Date.now()
   };
@@ -1311,7 +1323,30 @@ function applyBoardSnapshot(snap) {
   if (snap.score) score = snap.score.slice();
   if (snap.currentTurn) currentTurn = snap.currentTurn;
   if (snap.roundStarter) roundStarter = snap.roundStarter;
+  if (snap.roundShotCount !== undefined) roundShotCount = snap.roundShotCount;
   if (snap.rematchState) rematchState = snap.rematchState;
+
+  // Show/hide foul overlay to match sender's state
+  if (snap.foulActive && !foulActive) {
+    foulActive = true;
+    foulOverlay.classList.add("show");
+    goalScored = true;
+    setTimeout(function () {
+      foulOverlay.classList.remove("show");
+      foulActive = false;
+    }, 1500);
+  } else if (!snap.foulActive && foulActive) {
+    foulOverlay.classList.remove("show");
+    foulActive = false;
+  }
+
+  // Show/hide goal overlay to match sender's state
+  if (snap.gamePhase === "goal" && !snap.foulActive) {
+    goalOverlay.classList.add("show");
+    goalScored = true;
+  } else if (snap.gamePhase !== "goal") {
+    goalOverlay.classList.remove("show");
+  }
 
   pendingShot = false;
   updateScoreDisplay();

@@ -295,6 +295,7 @@ button#resetBtn:active { transform: translateY(0); }
   height: 8px;
   border-radius: 2px;
   animation: confettiFall 1.4s ease-out forwards;
+  pointer-events: none;
 }
 
 /* Animations */
