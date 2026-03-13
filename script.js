@@ -926,7 +926,6 @@ function onPointerUp(e) {
     pendingShot = false;
     Usion.game.requestSync(0);
   });
-  broadcastBoardSnapshot();
 
   selectedDisk = null;
   dragStart = null;
