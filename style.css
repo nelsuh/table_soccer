@@ -2,6 +2,7 @@
 
 body {
   min-height: 100vh;
+  min-height: 100dvh;
   background: #2d5a1e;
   font-family: system-ui, sans-serif;
   display: flex;
@@ -17,10 +18,13 @@ body {
 .game-container {
   width: 100%;
   max-width: 420px;
+  max-height: 100vh;
+  max-height: 100dvh;
   display: flex;
   flex-direction: column;
   align-items: center;
   padding: 8px;
+  overflow: hidden;
 }
 
 /* Top Bar */
@@ -56,11 +60,15 @@ body {
   align-items: center;
   gap: 6px;
   flex-direction: column;
+  flex-shrink: 0;
 }
 .score { font-size: 22px; font-weight: 900; }
 .score-dash { font-size: 18px; opacity: 0.5; }
 .score-area > div:first-child { display: flex; align-items: center; gap: 6px; }
 .goals-info { font-size: 10px; opacity: 0.6; }
+
+/* Player name truncation on small screens */
+.player-name { max-width: 60px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* Turn Indicator */
 .turn-indicator {
@@ -310,3 +318,18 @@ button#resetBtn:active { transform: translateY(0); }
 
 @keyframes goalPulse { from { transform: scale(1); } to { transform: scale(1.1); } }
 @keyframes confettiFall { 0% { transform: translateY(-10px) rotate(0deg); opacity: 1; } 100% { transform: translateY(300px) rotate(760deg); opacity: 0; } }
+
+/* Small screen adjustments */
+@media (max-height: 600px) {
+  .topbar { padding: 4px 8px; margin-bottom: 4px; }
+  .player-info img { width: 28px; height: 28px; }
+  .score { font-size: 18px; }
+  .turn-indicator { padding: 3px 8px; margin-bottom: 4px; font-size: 11px; }
+  .controls { margin-top: 4px; }
+  button#resetBtn { padding: 6px 14px; font-size: 11px; }
+}
+
+@media (max-width: 360px) {
+  .tactic-grid { grid-template-columns: repeat(2, 1fr); }
+  .tactic-preview { width: 60px; height: 78px; }
+}

@@ -109,6 +109,7 @@ let dragStart = null;
 let dragCurrent = null;
 let animFrame = null;
 let roundShotCount = 0; // shots taken this round (first-shot goal = foul)
+let goalScored = false; // guard to prevent multiple goal detections
 
 // Tactic state
 let myAttackTactic = "1-3-2";
@@ -117,6 +118,8 @@ let opponentAttackTactic = "1-3-2";
 let opponentDefenseTactic = "1-3-2";
 let tacticTimerInterval = null;
 let tacticTimeLeft = 10;
+let myTacticsConfirmed = false;
+let opponentTacticsReceived = false;
 
 // ── Multiplayer State ────────────────────────────────────
 let myId = null;
@@ -163,7 +166,16 @@ ctx = canvas.getContext("2d");
 function resizeCanvas() {
   const container = canvas.parentElement;
   const w = Math.min(container.clientWidth, 400);
-  const h = w * 1.5; // 2:3 aspect ratio (portrait soccer field)
+  // Calculate available height: viewport minus topbar, turn indicator, controls, and padding
+  var topbar = document.querySelector(".topbar");
+  var turnInd = document.getElementById("turnIndicator");
+  var controls = document.querySelector(".controls");
+  var usedHeight = (topbar ? topbar.offsetHeight : 0) +
+                   (turnInd ? turnInd.offsetHeight : 0) +
+                   (controls ? controls.offsetHeight : 0) + 40; // 40px for margins/padding
+  var availH = window.innerHeight - usedHeight;
+  var h = Math.min(w * 1.5, availH); // 2:3 aspect ratio but cap to available height
+  h = Math.max(h, w); // minimum 1:1 ratio
   canvas.width = w * window.devicePixelRatio;
   canvas.height = h * window.devicePixelRatio;
   canvas.style.width = w + "px";
@@ -257,6 +269,8 @@ function onAction(data) {
   if (data.action_type === "tactics" && data.player_id !== myId) {
     opponentAttackTactic = data.action_data.attack || "1-3-2";
     opponentDefenseTactic = data.action_data.defense || "1-3-2";
+    opponentTacticsReceived = true;
+    tryStartMatch();
   }
   // pendingShot is cleared in onShotComplete after physics settle
 }
@@ -286,6 +300,8 @@ function onRealtime(data) {
   if (data.action_type === "tactics_selected" && data.player_id !== myId) {
     opponentAttackTactic = data.action_data.attack || "1-3-2";
     opponentDefenseTactic = data.action_data.defense || "1-3-2";
+    opponentTacticsReceived = true;
+    tryStartMatch();
     return;
   }
   if (data.action_type === "rematch_state" && data.action_data) {
@@ -342,6 +358,10 @@ resetBtn.addEventListener("click", function () {
 // ── Tactic Selection ─────────────────────────────────────
 function showTacticSelection() {
   gamePhase = "tactics";
+  myTacticsConfirmed = false;
+  opponentTacticsReceived = false;
+  tacticConfirm.textContent = "CONFIRM";
+  tacticConfirm.disabled = false;
   tacticOverlay.classList.add("show");
   goalOverlay.classList.remove("show");
   winnerOverlay.classList.remove("show");
@@ -417,12 +437,26 @@ tacticConfirm.addEventListener("click", function () {
 });
 
 function confirmTactics() {
-  tacticOverlay.classList.remove("show");
   clearInterval(tacticTimerInterval);
+  myTacticsConfirmed = true;
 
   Usion.game.realtime("tactics_selected", { attack: myAttackTactic, defense: myDefenseTactic });
   Usion.game.action("tactics", { attack: myAttackTactic, defense: myDefenseTactic });
 
+  tryStartMatch();
+}
+
+function tryStartMatch() {
+  if (!myTacticsConfirmed) return;
+  if (!opponentTacticsReceived) {
+    // Show waiting state on the tactic overlay
+    tacticConfirm.textContent = "WAITING FOR OPPONENT...";
+    tacticConfirm.disabled = true;
+    return;
+  }
+  tacticOverlay.classList.remove("show");
+  tacticConfirm.textContent = "CONFIRM";
+  tacticConfirm.disabled = false;
   initMatch();
 }
 
@@ -446,6 +480,7 @@ function resetRound() {
   dragStart = null;
   dragCurrent = null;
   roundShotCount = 0;
+  goalScored = false;
   gamePhase = "playing";
   updateTurnIndicator();
   updateActivePanel();
@@ -784,7 +819,7 @@ function drawAimIndicator() {
 // ── Input Handling ───────────────────────────────────────
 function getCanvasPos(e) {
   var rect = canvas.getBoundingClientRect();
-  var touch = e.touches ? e.touches[0] : e;
+  var touch = e.touches ? e.touches[0] : (e.changedTouches ? e.changedTouches[0] : e);
   return {
     x: (touch.clientX - rect.left) * (fieldW / rect.width),
     y: (touch.clientY - rect.top) * (fieldH / rect.height)
@@ -808,11 +843,11 @@ function findDiskAt(pos) {
 }
 
 canvas.addEventListener("mousedown", onPointerDown);
-canvas.addEventListener("mousemove", onPointerMove);
-canvas.addEventListener("mouseup", onPointerUp);
+document.addEventListener("mousemove", onPointerMove);
+document.addEventListener("mouseup", onPointerUp);
 canvas.addEventListener("touchstart", onPointerDown, { passive: false });
-canvas.addEventListener("touchmove", onPointerMove, { passive: false });
-canvas.addEventListener("touchend", onPointerUp, { passive: false });
+document.addEventListener("touchmove", onPointerMove, { passive: false });
+document.addEventListener("touchend", onPointerUp, { passive: false });
 
 function onPointerDown(e) {
   e.preventDefault();
@@ -828,14 +863,13 @@ function onPointerDown(e) {
 }
 
 function onPointerMove(e) {
-  e.preventDefault();
   if (selectedDisk === null || !dragStart) return;
+  e.preventDefault();
   dragCurrent = getCanvasPos(e);
   render();
 }
 
 function onPointerUp(e) {
-  e.preventDefault();
   if (selectedDisk === null || !dragStart || !dragCurrent) {
     selectedDisk = null;
     dragStart = null;
@@ -892,6 +926,7 @@ function applyShot(data) {
 
   disks[diskIdx].vx = data.vx;
   disks[diskIdx].vy = data.vy;
+  roundShotCount++;
 
   gamePhase = "animating";
   startPhysicsLoop();
@@ -1028,6 +1063,8 @@ function allStopped() {
 }
 
 function checkGoal() {
+  if (goalScored) return false; // already processing a goal
+
   var goalW = fieldW * GOAL_WIDTH_RATIO;
   var gx1 = (fieldW - goalW) / 2;
   var gx2 = gx1 + goalW;
@@ -1035,6 +1072,7 @@ function checkGoal() {
 
   // Ball in top goal → Player 2 scores
   if (ball.y - ball.radius < goalDepth && ball.x > gx1 && ball.x < gx2) {
+    goalScored = true;
     physicsRunning = false;
     cancelAnimationFrame(animFrame);
     onGoalScored(2);
@@ -1043,6 +1081,7 @@ function checkGoal() {
 
   // Ball in bottom goal → Player 1 scores
   if (ball.y + ball.radius > fieldH - goalDepth && ball.x > gx1 && ball.x < gx2) {
+    goalScored = true;
     physicsRunning = false;
     cancelAnimationFrame(animFrame);
     onGoalScored(1);
@@ -1054,7 +1093,8 @@ function checkGoal() {
 
 function onGoalScored(scoringPlayer) {
   // First shot of the round scoring a goal is a foul
-  if (roundShotCount <= 1) {
+  // roundShotCount is 1 when the very first shot of the round scores
+  if (roundShotCount === 1) {
     gamePhase = "goal";
     foulOverlay.classList.add("show");
     broadcastBoardSnapshot();
@@ -1062,7 +1102,7 @@ function onGoalScored(scoringPlayer) {
     setTimeout(function () {
       foulOverlay.classList.remove("show");
       // Give the turn to the other player, restart the round
-      var foulPlayer = currentTurn;
+      var foulPlayer = roundStarter; // the player who started the round committed the foul
       roundStarter = foulPlayer === 1 ? 2 : 1;
       currentTurn = roundStarter;
       resetRound();
@@ -1176,11 +1216,33 @@ function resetForRematch() {
   rematchRequested = false;
   rematchState = "idle";
   pendingShot = false;
+  goalScored = false;
   lastSnapshotVersion = 0;
+  score = [0, 0];
+  currentTurn = 1;
+  roundStarter = 1;
+  roundShotCount = 0;
+  gamePhase = "tactics";
+  opponentAttackTactic = "1-3-2";
+  opponentDefenseTactic = "1-3-2";
+  myAttackTactic = "1-3-2";
+  myDefenseTactic = "1-3-2";
+  updateScoreDisplay();
   winnerOverlay.classList.remove("show");
+  goalOverlay.classList.remove("show");
+  foulOverlay.classList.remove("show");
   winnerPlayAgain.textContent = "Rematch";
   winnerPlayAgain.disabled = false;
   winnerPlayAgain.onclick = requestRematch;
+
+  // Reset tactic selection UI
+  document.querySelectorAll("#attackGrid .tactic-option").forEach(function (o, i) {
+    o.classList.toggle("selected", i === 0);
+  });
+  document.querySelectorAll("#defenseGrid .tactic-option").forEach(function (o, i) {
+    o.classList.toggle("selected", i === 0);
+  });
+
   showTacticSelection();
 }
 
@@ -1262,7 +1324,7 @@ function applyBoardSnapshot(snap) {
     startPhysicsLoop();
   } else {
     gamePhase = snap.gamePhase || "playing";
-    if (gamePhase === "ended" && score[0] >= GOALS_TO_WIN || score[1] >= GOALS_TO_WIN) {
+    if (gamePhase === "ended" && (score[0] >= GOALS_TO_WIN || score[1] >= GOALS_TO_WIN)) {
       var winner = score[0] >= GOALS_TO_WIN ? 1 : 2;
       onMatchEnd(winner);
     }
