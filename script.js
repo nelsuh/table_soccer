@@ -1083,32 +1083,39 @@ function allStopped() {
 
 function checkGoal() {
   if (goalScored) return false; // already processing a goal
-  if (snapshotPhysics) return false; // snapshot receiver doesn't process goals independently
 
   var goalW = fieldW * GOAL_WIDTH_RATIO;
   var gx1 = (fieldW - goalW) / 2;
   var gx2 = gx1 + goalW;
   var goalDepth = 14;
 
+  var scored = 0;
   // Ball in top goal → Player 2 scores
   if (ball.y - ball.radius < goalDepth && ball.x > gx1 && ball.x < gx2) {
-    goalScored = true;
-    physicsRunning = false;
-    cancelAnimationFrame(animFrame);
-    onGoalScored(2);
-    return true;
+    scored = 2;
   }
-
   // Ball in bottom goal → Player 1 scores
-  if (ball.y + ball.radius > fieldH - goalDepth && ball.x > gx1 && ball.x < gx2) {
-    goalScored = true;
-    physicsRunning = false;
-    cancelAnimationFrame(animFrame);
-    onGoalScored(1);
+  if (!scored && ball.y + ball.radius > fieldH - goalDepth && ball.x > gx1 && ball.x < gx2) {
+    scored = 1;
+  }
+
+  if (!scored) return false;
+
+  goalScored = true;
+  physicsRunning = false;
+  cancelAnimationFrame(animFrame);
+
+  // Snapshot receiver: stop physics but don't process the goal —
+  // the authoritative snapshot from the shooter will handle score/turn/reset.
+  if (snapshotPhysics) {
+    snapshotPhysics = false;
+    gamePhase = "goal";
+    render();
     return true;
   }
 
-  return false;
+  onGoalScored(scored);
+  return true;
 }
 
 function onGoalScored(scoringPlayer) {
