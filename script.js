@@ -135,6 +135,7 @@ let lastSnapshotVersion = 0;
 let rematchRequested = false;
 let rematchState = "idle";
 let pendingShot = false;
+let snapshotPhysics = false; // true when physics is running from a received snapshot (not a local shot)
 
 // ── DOM Refs ─────────────────────────────────────────────
 const turnIndicator = document.getElementById("turnIndicator");
@@ -483,6 +484,8 @@ function resetRound() {
   roundShotCount = 0;
   goalScored = false;
   foulActive = false;
+  pendingShot = false;
+  snapshotPhysics = false;
   gamePhase = "playing";
   updateTurnIndicator();
   updateActivePanel();
@@ -942,6 +945,7 @@ function applyShot(data) {
   disks[diskIdx].vy = data.vy * fieldH;
   roundShotCount++;
 
+  snapshotPhysics = false;
   gamePhase = "animating";
   startPhysicsLoop();
 }
@@ -952,6 +956,7 @@ function executeShot(data) {
   d.vy = data.vy;
   roundShotCount++;
 
+  snapshotPhysics = false;
   gamePhase = "animating";
   startPhysicsLoop();
 }
@@ -1078,6 +1083,7 @@ function allStopped() {
 
 function checkGoal() {
   if (goalScored) return false; // already processing a goal
+  if (snapshotPhysics) return false; // snapshot receiver doesn't process goals independently
 
   var goalW = fieldW * GOAL_WIDTH_RATIO;
   var gx1 = (fieldW - goalW) / 2;
@@ -1152,6 +1158,17 @@ function onGoalScored(scoringPlayer) {
 }
 
 function onShotComplete() {
+  // If physics was triggered by a received snapshot, don't switch turns —
+  // the snapshot already carries the correct currentTurn value.
+  if (snapshotPhysics) {
+    snapshotPhysics = false;
+    gamePhase = "playing";
+    updateTurnIndicator();
+    updateActivePanel();
+    render();
+    return;
+  }
+
   // Switch turns
   pendingShot = false;
   currentTurn = currentTurn === 1 ? 2 : 1;
@@ -1378,6 +1395,7 @@ function applyBoardSnapshot(snap) {
 
   // If objects are still moving, run physics
   if (!allStopped()) {
+    snapshotPhysics = true;
     gamePhase = "animating";
     startPhysicsLoop();
   } else {

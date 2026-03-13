@@ -21,3 +21,4 @@ when i drag my disk half power them my cursor out of field its cant change direc
 
 - If a player scores a point on the first shot of the round, it is considered a foul, the ball is forfeited and the opponent starts the round. The foul should not add points.
 - Sometimes, an FOUL  message appears when a player misses a goal. 
+
