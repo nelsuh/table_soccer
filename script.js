@@ -553,11 +553,19 @@ function setupDisksAndBall() {
 // ── Rendering ────────────────────────────────────────────
 function render() {
   ctx.clearRect(0, 0, fieldW, fieldH);
+  ctx.save();
+  // Player 1's own team is logically at the top. Flip the view vertically so
+  // each player always sees their own team at the bottom of their screen.
+  if (myPlayer === 1) {
+    ctx.translate(0, fieldH);
+    ctx.scale(1, -1);
+  }
   drawField();
   drawGoals();
   drawDisks();
   drawBall();
   drawAimIndicator();
+  ctx.restore();
 }
 
 function drawField() {
@@ -830,10 +838,11 @@ function drawAimIndicator() {
 function getCanvasPos(e) {
   var rect = canvas.getBoundingClientRect();
   var touch = e.touches ? e.touches[0] : (e.changedTouches ? e.changedTouches[0] : e);
-  return {
-    x: (touch.clientX - rect.left) * (fieldW / rect.width),
-    y: (touch.clientY - rect.top) * (fieldH / rect.height)
-  };
+  var x = (touch.clientX - rect.left) * (fieldW / rect.width);
+  var y = (touch.clientY - rect.top) * (fieldH / rect.height);
+  // Mirror input to match the flipped view for Player 1 (see render()).
+  if (myPlayer === 1) y = fieldH - y;
+  return { x: x, y: y };
 }
 
 function canIAct() {
@@ -1164,13 +1173,17 @@ function checkGoal() {
 }
 
 function onGoalScored(scoringPlayer) {
+  // The shooter (whose turn it currently is) is authoritative — only they
+  // broadcast, so the two clients don't fight over snapshot versions.
+  var iAmShooter = currentTurn === myPlayer;
+
   // First shot of the round scoring a goal is a foul
   // roundShotCount is 1 when the very first shot of the round scores
   if (roundShotCount === 1) {
     gamePhase = "goal";
     foulActive = true;
     foulOverlay.classList.add("show");
-    broadcastBoardSnapshot();
+    if (iAmShooter) broadcastBoardSnapshot();
 
     setTimeout(function () {
       foulOverlay.classList.remove("show");
@@ -1180,7 +1193,7 @@ function onGoalScored(scoringPlayer) {
       roundStarter = foulPlayer === 1 ? 2 : 1;
       currentTurn = roundStarter;
       resetRound();
-      broadcastBoardSnapshot();
+      if (iAmShooter) broadcastBoardSnapshot();
     }, 1500);
     return;
   }
@@ -1190,7 +1203,7 @@ function onGoalScored(scoringPlayer) {
   gamePhase = "goal";
 
   goalOverlay.classList.add("show");
-  broadcastBoardSnapshot();
+  if (iAmShooter) broadcastBoardSnapshot();
 
   setTimeout(function () {
     goalOverlay.classList.remove("show");
@@ -1205,7 +1218,7 @@ function onGoalScored(scoringPlayer) {
     currentTurn = roundStarter;
     resetRound();
 
-    broadcastBoardSnapshot();
+    if (iAmShooter) broadcastBoardSnapshot();
   }, 1500);
 }
 
@@ -1223,12 +1236,15 @@ function onShotComplete() {
 
   // Switch turns
   pendingShot = false;
+  // The shooter (whose turn it currently is, before switching) is authoritative
+  // for the final resting state — only they broadcast, to avoid conflicting snapshots.
+  var iWasShooter = currentTurn === myPlayer;
   currentTurn = currentTurn === 1 ? 2 : 1;
   gamePhase = "playing";
   updateTurnIndicator();
   updateActivePanel();
 
-  broadcastBoardSnapshot();
+  if (iWasShooter) broadcastBoardSnapshot();
 }
 
 // ── Score & UI ───────────────────────────────────────────
@@ -1264,6 +1280,7 @@ function updateActivePanel() {
 
 // ── Match End ────────────────────────────────────────────
 function onMatchEnd(winner) {
+  if (gamePhase === "ended") return; // already ended — avoid snapshot ping-pong / double confetti
   gamePhase = "ended";
 
   var winnerIdx = winner - 1;
