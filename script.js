@@ -15,6 +15,12 @@ const BALL_BOUNCE = 0.9;
 const FIXED_TIMESTEP_MS = 1000 / 60;
 const SHOT_START_DELAY_MS = 120;
 
+// Fixed logical field size. ALL physics, positions and collisions use these
+// units on every device, so the two clients simulate identically regardless
+// of screen size. Rendering and input scale between logical and display space.
+const LOGIC_W = 400;
+const LOGIC_H = 600;
+
 // ── Formation definitions ────────────────────────────────
 // Positions as fractions of field [x: 0-1, y: 0-1] for bottom player (player 2)
 // Player 1 (top) gets these mirrored vertically
@@ -141,6 +147,7 @@ let snapshotPhysics = false; // true when physics is running from a received sna
 let physicsAccumulator = 0;
 let lastPhysicsTime = 0;
 let scheduledShotTimer = null;
+let pendingSnapshot = null; // snapshot received mid-animation, applied once it settles
 
 // ── DOM Refs ─────────────────────────────────────────────
 const turnIndicator = document.getElementById("turnIndicator");
@@ -172,7 +179,7 @@ ctx = canvas.getContext("2d");
 
 function resizeCanvas() {
   const container = canvas.parentElement;
-  const w = Math.min(container.clientWidth, 400);
+  const maxW = Math.min(container.clientWidth, 400);
   // Calculate available height: viewport minus topbar, turn indicator, controls, and padding
   var topbar = document.querySelector(".topbar");
   var turnInd = document.getElementById("turnIndicator");
@@ -181,15 +188,31 @@ function resizeCanvas() {
                    (turnInd ? turnInd.offsetHeight : 0) +
                    (controls ? controls.offsetHeight : 0) + 40; // 40px for margins/padding
   var availH = window.innerHeight - usedHeight;
-  var h = Math.min(w * 1.5, availH); // 2:3 aspect ratio but cap to available height
-  h = Math.max(h, w); // minimum 1:1 ratio
-  canvas.width = w * window.devicePixelRatio;
-  canvas.height = h * window.devicePixelRatio;
-  canvas.style.width = w + "px";
-  canvas.style.height = h + "px";
-  ctx.setTransform(window.devicePixelRatio, 0, 0, window.devicePixelRatio, 0, 0);
-  fieldW = w;
-  fieldH = h;
+
+  // Keep a fixed 2:3 aspect (matching the logical field) so circles never
+  // distort and both clients share the same geometry. Fit within width and
+  // available height.
+  var displayW = maxW;
+  var displayH = displayW * (LOGIC_H / LOGIC_W);
+  if (displayH > availH && availH > 0) {
+    displayH = availH;
+    displayW = displayH * (LOGIC_W / LOGIC_H);
+  }
+
+  var dpr = window.devicePixelRatio || 1;
+  canvas.width = Math.round(displayW * dpr);
+  canvas.height = Math.round(displayH * dpr);
+  canvas.style.width = displayW + "px";
+  canvas.style.height = displayH + "px";
+
+  // Scale the logical field (LOGIC_W x LOGIC_H) onto the display canvas.
+  ctx.setTransform((displayW * dpr) / LOGIC_W, 0, 0, (displayH * dpr) / LOGIC_H, 0, 0);
+
+  // Physics always runs in fixed logical units — independent of screen size.
+  fieldW = LOGIC_W;
+  fieldH = LOGIC_H;
+
+  render();
 }
 resizeCanvas();
 window.addEventListener("resize", resizeCanvas);
@@ -491,6 +514,7 @@ function resetRound() {
   foulActive = false;
   pendingShot = false;
   snapshotPhysics = false;
+  pendingSnapshot = null;
   gamePhase = "playing";
   updateTurnIndicator();
   updateActivePanel();
@@ -1231,6 +1255,7 @@ function onShotComplete() {
     updateTurnIndicator();
     updateActivePanel();
     render();
+    flushPendingSnapshot();
     return;
   }
 
@@ -1245,6 +1270,16 @@ function onShotComplete() {
   updateActivePanel();
 
   if (iWasShooter) broadcastBoardSnapshot();
+  flushPendingSnapshot();
+}
+
+// Apply a snapshot that arrived while we were animating, now that we've settled.
+function flushPendingSnapshot() {
+  if (pendingSnapshot && !physicsRunning) {
+    var s = pendingSnapshot;
+    pendingSnapshot = null;
+    applyBoardSnapshot(s);
+  }
 }
 
 // ── Score & UI ───────────────────────────────────────────
@@ -1319,6 +1354,7 @@ function resetForRematch() {
   rematchState = "idle";
   pendingShot = false;
   goalScored = false;
+  pendingSnapshot = null;
   lastSnapshotVersion = 0;
   score = [0, 0];
   currentTurn = 1;
@@ -1411,6 +1447,15 @@ function broadcastRematchState() {
 function applyBoardSnapshot(snap) {
   var v = Number(snap.version || 0);
   if (v && v < lastSnapshotVersion) return;
+
+  // If we're mid-animation of a real shot, don't yank objects to the snapshot's
+  // resting positions — our deterministic simulation reaches the same end state.
+  // Stash it and apply as a smooth correction once the animation settles.
+  if (physicsRunning && !snapshotPhysics) {
+    pendingSnapshot = snap;
+    return;
+  }
+
   lastSnapshotVersion = Math.max(lastSnapshotVersion, v);
 
   if (Array.isArray(snap.disks)) {
