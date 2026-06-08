@@ -1197,9 +1197,11 @@ function checkGoal() {
 }
 
 function onGoalScored(scoringPlayer) {
-  // The shooter (whose turn it currently is) is authoritative — only they
-  // broadcast, so the two clients don't fight over snapshot versions.
-  var iAmShooter = currentTurn === myPlayer;
+  // The player whose turn it is right now is the one who took this shot.
+  var shooter = currentTurn;
+  // The shooter is authoritative — only they broadcast, so the two clients
+  // don't fight over snapshot versions.
+  var iAmShooter = shooter === myPlayer;
 
   // First shot of the round scoring a goal is a foul
   // roundShotCount is 1 when the very first shot of the round scores
@@ -1212,9 +1214,8 @@ function onGoalScored(scoringPlayer) {
     setTimeout(function () {
       foulOverlay.classList.remove("show");
       foulActive = false;
-      // Give the turn to the other player, restart the round
-      var foulPlayer = roundStarter;
-      roundStarter = foulPlayer === 1 ? 2 : 1;
+      // Rule: if a player fouls, the OTHER player starts the next round.
+      roundStarter = shooter === 1 ? 2 : 1;
       currentTurn = roundStarter;
       resetRound();
       if (iAmShooter) broadcastBoardSnapshot();
@@ -1237,7 +1238,7 @@ function onGoalScored(scoringPlayer) {
       return;
     }
 
-    // Next round: opponent of scorer starts
+    // Rule: if a player scores, the OTHER player starts the next round.
     roundStarter = scoringPlayer === 1 ? 2 : 1;
     currentTurn = roundStarter;
     resetRound();
