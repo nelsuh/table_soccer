@@ -21,6 +21,15 @@ const SHOT_START_DELAY_MS = 120;
 const LOGIC_W = 400;
 const LOGIC_H = 600;
 
+// ── Bot config ───────────────────────────────────────────
+// angleErr: max aim error in radians. powerMin/Max: fraction of MAX_SHOT_POWER.
+// thinkMs: pause before the bot shoots. gkPenalty: discourages moving the keeper.
+const BOT_CFG = {
+  easy:   { angleErr: 0.38, powerMin: 0.45, powerMax: 0.70, thinkMs: 1000, gkPenalty: 0.6 },
+  medium: { angleErr: 0.15, powerMin: 0.60, powerMax: 0.90, thinkMs: 800,  gkPenalty: 1.2 },
+  hard:   { angleErr: 0.04, powerMin: 0.82, powerMax: 1.00, thinkMs: 600,  gkPenalty: 2.0 }
+};
+
 // ── Formation definitions ────────────────────────────────
 // Positions as fractions of field [x: 0-1, y: 0-1] for bottom player (player 2)
 // Player 1 (top) gets these mirrored vertically
@@ -148,6 +157,12 @@ let physicsAccumulator = 0;
 let lastPhysicsTime = 0;
 let scheduledShotTimer = null;
 let pendingSnapshot = null; // snapshot received mid-animation, applied once it settles
+
+// ── Bot State ────────────────────────────────────────────
+let botMode = false;          // true = single-player vs local bot (bot is always player 2)
+let botDifficulty = "easy";   // easy | medium | hard
+let botThinking = false;
+let botTimer = null;
 
 // ── DOM Refs ─────────────────────────────────────────────
 const turnIndicator = document.getElementById("turnIndicator");
@@ -379,6 +394,40 @@ function updatePlayerDisplay() {
 function showWaiting() { waitingForOpponent = true; waitingOverlay.classList.add("show"); }
 function hideWaiting() { waitingOverlay.classList.remove("show"); }
 
+// ── Play vs Bot ──────────────────────────────────────────
+var botDiffEl = document.getElementById("botDiff");
+var playBotBtn = document.getElementById("playBotBtn");
+
+if (botDiffEl) {
+  botDiffEl.addEventListener("click", function (e) {
+    var btn = e.target.closest(".bot-diff-btn");
+    if (!btn) return;
+    botDiffEl.querySelectorAll(".bot-diff-btn").forEach(function (b) { b.classList.remove("selected"); });
+    btn.classList.add("selected");
+    botDifficulty = btn.dataset.diff;
+  });
+}
+if (playBotBtn) {
+  playBotBtn.addEventListener("click", function () { startBotGame(); });
+}
+
+function startBotGame() {
+  botMode = true;
+  waitingForOpponent = false;
+  hideWaiting();
+
+  // Human is always player 1, bot is player 2.
+  myPlayer = 1;
+  if (!myId) myId = "me";
+  if (!playerNames[myId]) playerNames[myId] = "You";
+  players = [myId, "BOT"];
+  playerNames["BOT"] = "Bot (" + botDifficulty.charAt(0).toUpperCase() + botDifficulty.slice(1) + ")";
+  playerAvatars["BOT"] = "https://api.dicebear.com/7.x/bottts/svg?seed=" + botDifficulty;
+
+  updatePlayerDisplay();
+  showTacticSelection();
+}
+
 
 // ── Controls ─────────────────────────────────────────────
 resetBtn.addEventListener("click", function () {
@@ -470,6 +519,16 @@ function confirmTactics() {
   clearInterval(tacticTimerInterval);
   myTacticsConfirmed = true;
 
+  if (botMode) {
+    // Bot picks random formations and is instantly "ready".
+    var keys = Object.keys(FORMATIONS);
+    opponentAttackTactic = keys[Math.floor(Math.random() * keys.length)];
+    opponentDefenseTactic = keys[Math.floor(Math.random() * keys.length)];
+    opponentTacticsReceived = true;
+    tryStartMatch();
+    return;
+  }
+
   Usion.game.realtime("tactics_selected", { attack: myAttackTactic, defense: myDefenseTactic });
   Usion.game.action("tactics", { attack: myAttackTactic, defense: myDefenseTactic });
 
@@ -505,6 +564,7 @@ function initMatch() {
 }
 
 function resetRound() {
+  cancelBotMove();
   setupDisksAndBall();
   selectedDisk = null;
   dragStart = null;
@@ -519,6 +579,7 @@ function resetRound() {
   updateTurnIndicator();
   updateActivePanel();
   render();
+  maybeTriggerBot();
 }
 
 function setupDisksAndBall() {
@@ -953,25 +1014,27 @@ function onPointerUp(e) {
   };
 
   scheduleLocalShot(shotData);
-
-  // Send normalized velocities to opponent so different screen sizes work
-  var netShotData = {
-    diskIndex: selectedDisk,
-    vx: vx / fieldW,
-    vy: vy / fieldH,
-    player: currentTurn,
-    startAt: startAt
-  };
-
   pendingShot = true;
-  Usion.game.action("shot", netShotData).catch(function () {
-    pendingShot = false;
-    if (scheduledShotTimer) {
-      clearTimeout(scheduledShotTimer);
-      scheduledShotTimer = null;
-    }
-    Usion.game.requestSync(0);
-  });
+
+  if (!botMode) {
+    // Send normalized velocities to opponent so different screen sizes work
+    var netShotData = {
+      diskIndex: selectedDisk,
+      vx: vx / fieldW,
+      vy: vy / fieldH,
+      player: currentTurn,
+      startAt: startAt
+    };
+
+    Usion.game.action("shot", netShotData).catch(function () {
+      pendingShot = false;
+      if (scheduledShotTimer) {
+        clearTimeout(scheduledShotTimer);
+        scheduledShotTimer = null;
+      }
+      Usion.game.requestSync(0);
+    });
+  }
 
   selectedDisk = null;
   dragStart = null;
@@ -1272,6 +1335,85 @@ function onShotComplete() {
 
   if (iWasShooter) broadcastBoardSnapshot();
   flushPendingSnapshot();
+  maybeTriggerBot();
+}
+
+// ── Bot ──────────────────────────────────────────────────
+function cancelBotMove() {
+  botThinking = false;
+  if (botTimer) { clearTimeout(botTimer); botTimer = null; }
+}
+
+// If it's the bot's turn, schedule its shot after a short "thinking" pause.
+function maybeTriggerBot() {
+  if (!botMode || botThinking) return;
+  if (gamePhase !== "playing") return;
+  if (currentTurn !== 2) return; // bot is always player 2
+  botThinking = true;
+  var cfg = BOT_CFG[botDifficulty] || BOT_CFG.medium;
+  botTimer = setTimeout(function () {
+    botTimer = null;
+    botThinking = false;
+    botShoot();
+  }, cfg.thinkMs);
+}
+
+function botShoot() {
+  if (!botMode || gamePhase !== "playing" || currentTurn !== 2) return;
+  var move = computeBotMove();
+  if (!move) return;
+  pendingShot = true; // block stray human input during the bot's animation
+  executeShot({ diskIndex: move.diskIndex, vx: move.vx, vy: move.vy, player: 2 });
+}
+
+// Pick a bot disk and an aim that pushes the ball toward the opponent's (top) goal.
+function computeBotMove() {
+  if (!ball) return null;
+  var cfg = BOT_CFG[botDifficulty] || BOT_CFG.medium;
+  var pad = 10;
+
+  // Player 2 attacks the TOP goal (small y).
+  var goal = { x: fieldW / 2, y: pad + 4 };
+  var bgx = goal.x - ball.x, bgy = goal.y - ball.y;
+  var bgLen = Math.sqrt(bgx * bgx + bgy * bgy) || 1;
+  var bgnx = bgx / bgLen, bgny = bgy / bgLen; // ball -> goal direction
+
+  // Identify the keeper (player-2 disk nearest its own/bottom goal).
+  var gkIndex = -1, gkY = -Infinity;
+  for (var k = 0; k < disks.length; k++) {
+    if (disks[k].player === 2 && disks[k].y > gkY) { gkY = disks[k].y; gkIndex = k; }
+  }
+
+  var best = null, bestScore = -Infinity;
+  for (var i = 0; i < disks.length; i++) {
+    var d = disks[i];
+    if (d.player !== 2) continue;
+    var tbx = ball.x - d.x, tby = ball.y - d.y;
+    var tbLen = Math.sqrt(tbx * tbx + tby * tby) || 1;
+    var align = (tbx / tbLen) * bgnx + (tby / tbLen) * bgny; // 1 = disk is behind ball toward goal
+    var score = align * 2 - (tbLen / fieldH); // prefer good alignment & closeness
+    if (i === gkIndex) score -= cfg.gkPenalty;
+    if (score > bestScore) { bestScore = score; best = i; }
+  }
+  if (best === null) return null;
+
+  var bd = disks[best];
+  // Aim the disk center at the contact spot that drives the ball goalward.
+  var contact = bd.radius + ball.radius;
+  var aimx = ball.x - bgnx * contact, aimy = ball.y - bgny * contact;
+  var dx = aimx - bd.x, dy = aimy - bd.y;
+  var dLen = Math.sqrt(dx * dx + dy * dy) || 1;
+  var nx = dx / dLen, ny = dy / dLen;
+
+  // Apply difficulty-based aim error.
+  var err = (Math.random() * 2 - 1) * cfg.angleErr;
+  var c = Math.cos(err), s = Math.sin(err);
+  var rx = nx * c - ny * s, ry = nx * s + ny * c;
+
+  var pf = cfg.powerMin + Math.random() * (cfg.powerMax - cfg.powerMin);
+  var power = pf * MAX_SHOT_POWER;
+
+  return { diskIndex: best, vx: rx * power, vy: ry * power };
 }
 
 // Apply a snapshot that arrived while we were animating, now that we've settled.
@@ -1317,6 +1459,7 @@ function updateActivePanel() {
 // ── Match End ────────────────────────────────────────────
 function onMatchEnd(winner) {
   if (gamePhase === "ended") return; // already ended — avoid snapshot ping-pong / double confetti
+  cancelBotMove();
   gamePhase = "ended";
 
   var winnerIdx = winner - 1;
@@ -1336,6 +1479,11 @@ function onMatchEnd(winner) {
 
 // ── Rematch ──────────────────────────────────────────────
 function requestRematch() {
+  if (botMode) {
+    // No opponent to ask — just restart immediately.
+    resetForRematch();
+    return;
+  }
   rematchRequested = true;
   rematchState = "requested";
   syncRematchUi();
@@ -1436,12 +1584,14 @@ function getBoardSnapshot() {
 }
 
 function broadcastBoardSnapshot() {
+  if (botMode) return; // no remote opponent to sync with
   var snap = getBoardSnapshot();
   lastSnapshotVersion = Math.max(lastSnapshotVersion, snap.version);
   Usion.game.realtime("board_state", snap);
 }
 
 function broadcastRematchState() {
+  if (botMode) return;
   Usion.game.realtime("rematch_state", { state: rematchState });
 }
 

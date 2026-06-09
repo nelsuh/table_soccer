@@ -154,6 +154,24 @@ button#resetBtn:active { transform: translateY(0); }
 }
 .overlay-text { font-size: 15px; opacity: 0.8; margin-bottom: 18px; }
 
+/* Play vs Bot */
+.bot-options { margin-top: 6px; border-top: 1px solid rgba(255,255,255,0.12); padding-top: 16px; }
+.bot-label { font-size: 12px; opacity: 0.55; margin-bottom: 12px; letter-spacing: 1px; }
+.bot-diff { display: flex; gap: 8px; justify-content: center; margin-bottom: 14px; }
+.bot-diff-btn {
+  background: rgba(255,255,255,0.1);
+  border: 2px solid rgba(255,255,255,0.2);
+  color: #fff;
+  padding: 8px 14px;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: border-color 0.2s, background 0.2s;
+}
+.bot-diff-btn:hover { background: rgba(255,255,255,0.18); }
+.bot-diff-btn.selected { border-color: #00e5ff; background: rgba(0,229,255,0.18); }
+
 /* Tactic Selection */
 .tactic-card {
   background: linear-gradient(145deg, #1a3d10, #2d5a1e);
