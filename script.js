@@ -232,92 +232,11 @@ function resizeCanvas() {
 resizeCanvas();
 window.addEventListener("resize", resizeCanvas);
 
-// ── Usion capabilities: cloud stats · leaderboard · notify · checkpoint ──
-// All wrappers are defensive: missing modules / standalone preview must never
-// throw (a thrown error in init blanks the game). They no-op gracefully.
-// This is a real-time win/loss game (no draws). botMode === single-player.
-
-let myStats = { wins: 0, losses: 0, games: 0 };
-let statsRecordedThisGame = false;
-const STATS_KEY = "tablesoccer:stats";
-
-function isMultiplayerGame() {
-  return !botMode && Array.isArray(players) && players.length >= 2;
-}
-
-function isHostPlayer() {
-  return !botMode && Array.isArray(players) && players.length > 0 && players[0] === myId;
-}
-
-// Cross-device stats: prefer Cloud KV, fall back to localStorage cache.
-async function loadStats() {
-  try {
-    if (window.Usion && Usion.cloud) {
-      const remote = await Usion.cloud.get(STATS_KEY);
-      if (remote && typeof remote === "object") {
-        myStats = Object.assign(myStats, remote);
-        try { localStorage.setItem(STATS_KEY, JSON.stringify(myStats)); } catch (_) {}
-        return;
-      }
-    }
-  } catch (_) {}
-  try {
-    const raw = localStorage.getItem(STATS_KEY);
-    if (raw) myStats = Object.assign(myStats, JSON.parse(raw));
-  } catch (_) {}
-}
-
-function persistStats() {
-  try { localStorage.setItem(STATS_KEY, JSON.stringify(myStats)); } catch (_) {}
-  try { if (window.Usion && Usion.cloud) Usion.cloud.set(STATS_KEY, myStats); } catch (_) {}
-}
-
-function submitLeaderboard() {
-  try {
-    if (window.Usion && Usion.leaderboard) {
-      // Score = cumulative wins; ranked highest-first. (Needs leaderboard.enabled on the service.)
-      Usion.leaderboard.submit(myStats.wins, { games: myStats.games });
-    }
-  } catch (_) {}
-}
-
-function notifySelf(title, body) {
-  // Only fires when the app is backgrounded.
-  try { if (window.Usion && Usion.notify && document.hidden) Usion.notify.send({ title, body }); } catch (_) {}
-}
-
-// Record MY outcome exactly once per multiplayer match (idempotent across snapshot replay).
-function recordOutcome(winnerPlayer) {
-  if (statsRecordedThisGame || !isMultiplayerGame()) return;
-  statsRecordedThisGame = true;
-  myStats.games += 1;
-  if (winnerPlayer === myPlayer) {
-    myStats.wins += 1;
-    notifySelf("You won! 🎉", "You won your Table Soccer match");
-  } else {
-    myStats.losses += 1;
-    notifySelf("Match over", "Your Table Soccer match ended");
-  }
-  persistStats();
-  submitLeaderboard();
-  try { if (window.Usion && Usion.cloud && Usion.cloud.shared) Usion.cloud.shared.incr("games_total", 1); } catch (_) {}
-}
-
-// Host (playerIds[0]) checkpoints a compact authoritative summary so reconnecting
-// clients load it as game_state instead of replaying physics from zero.
-function hostCheckpoint() {
-  if (!isHostPlayer()) return;
-  try {
-    if (window.Usion && Usion.game && Usion.game.setState) Usion.game.setState(getBoardSnapshot());
-  } catch (_) {}
-}
-
 // ── Usion Init ───────────────────────────────────────────
 Usion.init(async function (config) {
   myId = config.userId;
   playerNames[myId] = config.userName || "You";
   if (config.userAvatar) playerAvatars[myId] = config.userAvatar;
-  loadStats(); // fire-and-forget; never block init/render
 
   showWaiting();
   if (config.roomId) {
@@ -383,10 +302,7 @@ function onPlayerJoined(data) {
 
 function onPlayerLeft() {
   connectedCount = Math.max(0, connectedCount - 1);
-  if (gamePhase !== "ended") {
-    updateTurnIndicator("Opponent left the game");
-    notifySelf("Opponent left", "Your opponent left the Table Soccer match");
-  }
+  if (gamePhase !== "ended") updateTurnIndicator("Opponent left the game");
 }
 
 function onAction(data) {
@@ -641,7 +557,6 @@ function initMatch() {
   gamePhase = "playing";
   pendingShot = false;
   rematchState = "idle";
-  statsRecordedThisGame = false;
   winnerOverlay.classList.remove("show");
   goalOverlay.classList.remove("show");
   updateScoreDisplay();
@@ -1557,9 +1472,6 @@ function onMatchEnd(winner) {
   spawnConfetti();
   winnerOverlay.classList.add("show");
 
-  recordOutcome(winner);
-  hostCheckpoint();
-
   rematchState = "idle";
   syncRematchUi();
   broadcastBoardSnapshot();
@@ -1593,7 +1505,6 @@ function resetForRematch() {
   goalScored = false;
   pendingSnapshot = null;
   lastSnapshotVersion = 0;
-  statsRecordedThisGame = false;
   score = [0, 0];
   currentTurn = 1;
   roundStarter = 1;
@@ -1677,12 +1588,6 @@ function broadcastBoardSnapshot() {
   var snap = getBoardSnapshot();
   lastSnapshotVersion = Math.max(lastSnapshotVersion, snap.version);
   Usion.game.realtime("board_state", snap);
-  // Host-only: persist a compact authoritative checkpoint for reconnecting clients.
-  if (isHostPlayer()) {
-    try {
-      if (window.Usion && Usion.game && Usion.game.setState) Usion.game.setState(snap);
-    } catch (_) {}
-  }
 }
 
 function broadcastRematchState() {
