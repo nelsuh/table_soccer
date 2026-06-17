@@ -158,14 +158,6 @@ let lastPhysicsTime = 0;
 let scheduledShotTimer = null;
 let pendingSnapshot = null; // snapshot received mid-animation, applied once it settles
 
-// ── Forfeit-on-leave ─────────────────────────────────────
-// When the opponent leaves mid-match we give them a 15s grace window to return.
-// If they don't, the remaining player wins by forfeit; if they do, the host
-// re-pushes the board so the match continues instead of restarting.
-const FORFEIT_GRACE_MS = 15000;
-let forfeitTimer = null;
-let forfeitCountdownInterval = null;
-
 // ── Bot State ────────────────────────────────────────────
 let botMode = false;          // true = single-player vs local bot (bot is always player 2)
 let botDifficulty = "easy";   // easy | medium | hard
@@ -386,58 +378,15 @@ function onPlayerJoined(data) {
     avatar: playerAvatars[myId] || null
   });
 
-  // The opponent came back — abort any pending forfeit and resync them.
-  cancelForfeitAndResume();
-
   if (connectedCount >= 2 && waitingForOpponent) startOnlineGame();
 }
 
 function onPlayerLeft() {
   connectedCount = Math.max(0, connectedCount - 1);
-  if (gamePhase === "ended") return;
-  notifySelf("Opponent left", "Your opponent left the Table Soccer match");
-  startForfeitCountdown();
-}
-
-// Begin the 15s grace countdown after the opponent disconnects mid-match. Only
-// runs once a real match is in progress (a ball exists); during tactic
-// selection there is no board to forfeit. Idempotent — repeated leaves won't
-// stack timers.
-function startForfeitCountdown() {
-  if (botMode || gamePhase === "ended" || !ball) return;
-  if (forfeitTimer) return; // already counting down
-  var secondsLeft = Math.round(FORFEIT_GRACE_MS / 1000);
-  updateTurnIndicator("Opponent left — auto-win in " + secondsLeft + "s");
-  forfeitCountdownInterval = setInterval(function () {
-    secondsLeft--;
-    if (gamePhase === "ended") { clearForfeitCountdown(); return; }
-    if (secondsLeft > 0) updateTurnIndicator("Opponent left — auto-win in " + secondsLeft + "s");
-  }, 1000);
-  forfeitTimer = setTimeout(function () {
-    clearForfeitCountdown();
-    if (gamePhase === "ended" || myPlayer < 1) return;
-    // Opponent never returned — the remaining player wins by forfeit.
-    score[myPlayer - 1] = GOALS_TO_WIN;
-    updateScoreDisplay();
-    onMatchEnd(myPlayer);
-  }, FORFEIT_GRACE_MS);
-}
-
-function clearForfeitCountdown() {
-  if (forfeitTimer) { clearTimeout(forfeitTimer); forfeitTimer = null; }
-  if (forfeitCountdownInterval) { clearInterval(forfeitCountdownInterval); forfeitCountdownInterval = null; }
-}
-
-// Opponent returned within the grace window: cancel the forfeit and resync them
-// into the live match. The host owns the authoritative board, so it re-pushes a
-// snapshot — covering live rejoins the same way the host checkpoint covers full
-// page reloads.
-function cancelForfeitAndResume() {
-  if (!forfeitTimer && !forfeitCountdownInterval) return;
-  clearForfeitCountdown();
-  if (gamePhase === "ended") return;
-  updateTurnIndicator();
-  if (isHostPlayer()) broadcastBoardSnapshot();
+  if (gamePhase !== "ended") {
+    updateTurnIndicator("Opponent left the game");
+    notifySelf("Opponent left", "Your opponent left the Table Soccer match");
+  }
 }
 
 function onAction(data) {
@@ -501,15 +450,7 @@ function onRealtime(data) {
     return;
   }
   if (data.action_type === "board_state" && data.player_id !== myId) {
-    // A returning client may still be sitting on the tactic-selection overlay.
-    // An authoritative in-progress board means the match is live — resume into
-    // it (dropping the tactics UI) instead of merely patching object positions.
-    if (gamePhase === "tactics" && data.action_data &&
-        Array.isArray(data.action_data.disks) && data.action_data.disks.length) {
-      resumeFromCheckpoint(data.action_data);
-    } else {
-      applyBoardSnapshot(data.action_data);
-    }
+    applyBoardSnapshot(data.action_data);
     // Host persists every authoritative snapshot (including the opponent's
     // shots) so the checkpoint a reconnecting client loads is always current,
     // not just the host's own last shot.
@@ -1637,7 +1578,6 @@ function updateActivePanel() {
 function onMatchEnd(winner) {
   if (gamePhase === "ended") return; // already ended — avoid snapshot ping-pong / double confetti
   cancelBotMove();
-  clearForfeitCountdown();
   gamePhase = "ended";
 
   var winnerIdx = winner - 1;
@@ -1680,7 +1620,6 @@ function acceptRematch() {
 }
 
 function resetForRematch() {
-  clearForfeitCountdown();
   rematchRequested = false;
   rematchState = "idle";
   pendingShot = false;
