@@ -410,36 +410,9 @@ function onSync(data) {
     lastSnapshotVersion = Math.max(lastSnapshotVersion, Number(data.sequence) || 0);
     lastSequence = data.sequence;
   }
-  // Resume from the host's checkpoint. Physics replays are non-deterministic, so
-  // we never replay the action log; instead the host setState()'s a board
-  // snapshot as game_state. Realtime board_state messages are ephemeral — a
-  // rejoining client never receives the past ones — so without consuming the
-  // checkpoint here the rejoin lands on a freshly-begun match. (This is why both
-  // host and guest previously failed to recover their in-progress game.)
-  var gs = data.game_state;
-  if (gs && Array.isArray(gs.disks) && gs.disks.length) {
-    resumeFromCheckpoint(gs);
-  }
-}
-
-// Rejoin an in-progress match straight from the host's board checkpoint: drop
-// any tactics-selection UI/timer, restore the chosen formations, and apply the
-// authoritative board state.
-function resumeFromCheckpoint(snap) {
-  clearInterval(tacticTimerInterval);
-  tacticOverlay.classList.remove("show");
-  waitingForOpponent = false;
-  myTacticsConfirmed = true;
-  opponentTacticsReceived = true;
-  if (snap.tactics) {
-    var mine = snap.tactics[myPlayer];
-    var opp = snap.tactics[myPlayer === 1 ? 2 : 1];
-    if (mine) { myAttackTactic = mine.atk || myAttackTactic; myDefenseTactic = mine.def || myDefenseTactic; }
-    if (opp) { opponentAttackTactic = opp.atk || opponentAttackTactic; opponentDefenseTactic = opp.def || opponentDefenseTactic; }
-  }
-  // A fresh page load starts lastSnapshotVersion at 0; the checkpoint's
-  // Date.now() version comfortably clears applyBoardSnapshot's staleness guard.
-  applyBoardSnapshot(snap);
+  if (!data.actions || data.actions.length === 0) return;
+  // Replay from snapshot is handled via realtime board_state, not full action replay
+  // because physics replays are non-deterministic
 }
 
 function onRealtime(data) {
@@ -451,12 +424,6 @@ function onRealtime(data) {
   }
   if (data.action_type === "board_state" && data.player_id !== myId) {
     applyBoardSnapshot(data.action_data);
-    // Host persists every authoritative snapshot (including the opponent's
-    // shots) so the checkpoint a reconnecting client loads is always current,
-    // not just the host's own last shot.
-    if (isHostPlayer()) {
-      try { if (window.Usion && Usion.game && Usion.game.setState) Usion.game.setState(data.action_data); } catch (_) {}
-    }
     return;
   }
   if (data.action_type === "tactics_selected" && data.player_id !== myId) {
@@ -1701,16 +1668,6 @@ function getBoardSnapshot() {
     roundShotCount: roundShotCount,
     foulActive: foulActive,
     rematchState: rematchState,
-    // Player-relative formations so a reconnecting client can rebuild the board
-    // correctly after future goals (resetRound → setupDisksAndBall needs these).
-    tactics: {
-      1: (myPlayer === 1
-        ? { atk: myAttackTactic, def: myDefenseTactic }
-        : { atk: opponentAttackTactic, def: opponentDefenseTactic }),
-      2: (myPlayer === 2
-        ? { atk: myAttackTactic, def: myDefenseTactic }
-        : { atk: opponentAttackTactic, def: opponentDefenseTactic })
-    },
     version: Date.now()
   };
 }
