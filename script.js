@@ -1266,6 +1266,18 @@ function onGoalScored(scoringPlayer) {
   // don't fight over snapshot versions.
   var iAmShooter = shooter === myPlayer;
 
+  // Receiver is NOT authoritative for goals/fouls. Local physics is not
+  // bit-identical across machines, so the non-shooter must not run its own
+  // score/turn/reset logic — otherwise a stale pre-foul snapshot can revert
+  // the turn back to the fouling player. Just freeze and wait for the
+  // shooter's authoritative snapshot to deliver score / turn / reset.
+  if (!botMode && !iAmShooter) {
+    gamePhase = "goal";
+    render();
+    flushPendingSnapshot();
+    return;
+  }
+
   // First shot of the round scoring a goal is a foul
   // roundShotCount is 1 when the very first shot of the round scores
   if (roundShotCount === 1) {
@@ -1328,12 +1340,18 @@ function onShotComplete() {
   // The shooter (whose turn it currently is, before switching) is authoritative
   // for the final resting state — only they broadcast, to avoid conflicting snapshots.
   var iWasShooter = currentTurn === myPlayer;
-  currentTurn = currentTurn === 1 ? 2 : 1;
   gamePhase = "playing";
+
+  // Only the authoritative client advances the turn. The receiver waits for the
+  // shooter's snapshot to set currentTurn, so the two clients can never disagree
+  // about whose turn it is (which is what let the ball revert to the fouler).
+  if (botMode || iWasShooter) {
+    currentTurn = currentTurn === 1 ? 2 : 1;
+    if (iWasShooter) broadcastBoardSnapshot();
+  }
   updateTurnIndicator();
   updateActivePanel();
 
-  if (iWasShooter) broadcastBoardSnapshot();
   flushPendingSnapshot();
   maybeTriggerBot();
 }
@@ -1608,6 +1626,8 @@ function applyBoardSnapshot(snap) {
   }
 
   lastSnapshotVersion = Math.max(lastSnapshotVersion, v);
+  // A newer authoritative snapshot supersedes any older one we stashed mid-shot.
+  pendingSnapshot = null;
 
   if (Array.isArray(snap.disks)) {
     disks = snap.disks.map(function (d) {
