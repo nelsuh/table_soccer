@@ -5,8 +5,11 @@
 const GOALS_TO_WIN = 3;
 const DISK_RADIUS = 18;
 const BALL_RADIUS = 10;
-const GOAL_WIDTH_RATIO = 0.28;
-const FIELD_PAD = 16; // out-of-bounds margin (px). The goal nets live in this margin.
+const GOAL_WIDTH_RATIO = 0.40; // goal-mouth width as a fraction of field width
+const SIDE_PAD = 16;  // left/right wall inset (px)
+const END_PAD  = 40;  // top/bottom goal-line inset (px). Also the goal-pocket depth:
+                      // disks AND the ball can travel through the mouth into this
+                      // pocket, so a disk can push the ball through the line.
 const MAX_SHOT_POWER = 18;
 const FRICTION = 0.97;
 const STOP_THRESHOLD = 0.15;
@@ -655,7 +658,7 @@ function render() {
 }
 
 function drawField() {
-  var pad = FIELD_PAD;
+  var sx = SIDE_PAD, ey = END_PAD;   // x inset (sides) / y inset (ends)
   var w = fieldW, h = fieldH;
 
   // Green field with stripe pattern
@@ -669,12 +672,12 @@ function drawField() {
   ctx.lineWidth = 2;
 
   // Outer boundary (square corners, matching the sketch)
-  ctx.strokeRect(pad, pad, w - pad * 2, h - pad * 2);
+  ctx.strokeRect(sx, ey, w - sx * 2, h - ey * 2);
 
   // Center line
   ctx.beginPath();
-  ctx.moveTo(pad, h / 2);
-  ctx.lineTo(w - pad, h / 2);
+  ctx.moveTo(sx, h / 2);
+  ctx.lineTo(w - sx, h / 2);
   ctx.stroke();
 
   // Center circle + kick-off dot
@@ -686,34 +689,34 @@ function drawField() {
   ctx.fill();
 
   // Penalty boxes (large) — top & bottom
-  var penW = w * 0.6, penH = h * 0.13;
-  ctx.strokeRect((w - penW) / 2, pad, penW, penH);
-  ctx.strokeRect((w - penW) / 2, h - pad - penH, penW, penH);
+  var penW = w * 0.6, penH = h * 0.12;
+  ctx.strokeRect((w - penW) / 2, ey, penW, penH);
+  ctx.strokeRect((w - penW) / 2, h - ey - penH, penW, penH);
 
   // Goal boxes (small, 6-yard) — top & bottom
-  var gbW = w * 0.4, gbH = h * 0.06;
-  ctx.strokeRect((w - gbW) / 2, pad, gbW, gbH);
-  ctx.strokeRect((w - gbW) / 2, h - pad - gbH, gbW, gbH);
+  var gbW = w * 0.45, gbH = h * 0.055;
+  ctx.strokeRect((w - gbW) / 2, ey, gbW, gbH);
+  ctx.strokeRect((w - gbW) / 2, h - ey - gbH, gbW, gbH);
 
   // Penalty spots
-  ctx.beginPath(); ctx.arc(w / 2, pad + penH * 0.7, 2, 0, Math.PI * 2); ctx.fill();
-  ctx.beginPath(); ctx.arc(w / 2, h - pad - penH * 0.7, 2, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.arc(w / 2, ey + penH * 0.7, 2, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.arc(w / 2, h - ey - penH * 0.7, 2, 0, Math.PI * 2); ctx.fill();
 
   // Penalty arcs (the "D") bulging into the field
   var arcR = w * 0.13;
   ctx.beginPath();
-  ctx.arc(w / 2, pad + penH, arcR, 0, Math.PI);
+  ctx.arc(w / 2, ey + penH, arcR, 0, Math.PI);
   ctx.stroke();
   ctx.beginPath();
-  ctx.arc(w / 2, h - pad - penH, arcR, Math.PI, Math.PI * 2);
+  ctx.arc(w / 2, h - ey - penH, arcR, Math.PI, Math.PI * 2);
   ctx.stroke();
 }
 
 function drawGoals() {
   var goalW = fieldW * GOAL_WIDTH_RATIO;
   var gx = (fieldW - goalW) / 2;
-  var pad = FIELD_PAD;            // end line sits at y = pad / fieldH - pad
-  var depth = pad;               // net protrudes the full margin, outside the pitch
+  var pad = END_PAD;             // end line sits at y = pad / fieldH - pad
+  var depth = pad;              // net pocket runs from the line to the canvas edge
 
   // One goal net. lineY = the goal line (end line); backY = back of the net
   // (toward the edge of the canvas, outside the pitch).
@@ -750,7 +753,29 @@ function drawGoals() {
 }
 
 function drawDisks() {
+  // Highlight my movable disks on my turn — but NOT while I'm aiming a drag.
+  var showHighlight = currentTurn === myPlayer &&
+                      gamePhase === "playing" && dragStart === null;
+
   disks.forEach(function (d, idx) {
+    // Selectable-disk highlight (cyan glow, from commit 5de6214) — hidden while
+    // aiming a drag (showHighlight already requires dragStart === null).
+    if (showHighlight && d.player === myPlayer) {
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(d.x, d.y, d.radius + 5, 0, Math.PI * 2);
+      ctx.fillStyle = "rgba(0, 229, 255, 0.25)";
+      ctx.fill();
+      if (selectedDisk === idx) {
+        ctx.beginPath();
+        ctx.arc(d.x, d.y, d.radius + 8, 0, Math.PI * 2);
+        ctx.strokeStyle = "rgba(0, 229, 255, 0.7)";
+        ctx.lineWidth = 2;
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+
     // Disk body
     ctx.save();
     ctx.beginPath();
@@ -1023,17 +1048,25 @@ function scheduleLocalShot(data) {
 }
 
 function applyShot(data) {
-  if (data.player !== currentTurn) return;
   // Find the right disk for the opponent's shot
   var diskIdx = data.diskIndex;
   if (diskIdx === undefined || diskIdx < 0 || diskIdx >= disks.length) return;
   if (disks[diskIdx].player !== data.player) return;
 
+  // An incoming shot from the opponent is the authoritative signal that it's
+  // their turn. Sync currentTurn to it instead of gating on it — otherwise a
+  // lost/late "next turn" snapshot (sent over the unreliable realtime channel)
+  // leaves currentTurn stale, the shot gets dropped, and the watcher sees no
+  // live move — just the board teleporting when the shot settles.
+  currentTurn = data.player;
+  pendingShot = true;
+  updateTurnIndicator();
+  updateActivePanel();
+
   var startAt = Number(data.startAt || 0);
   var delay = Math.max(0, startAt - Date.now());
 
   setTimeout(function () {
-    if (data.player !== currentTurn) return;
     if (diskIdx < 0 || diskIdx >= disks.length) return;
     if (disks[diskIdx].player !== data.player) return;
 
@@ -1112,37 +1145,9 @@ function updatePhysics() {
     if (Math.abs(obj.vy) < STOP_THRESHOLD) obj.vy = 0;
   });
 
-  // Wall collisions for disks
-  var pad = FIELD_PAD;
-  disks.forEach(function (d) {
-    if (d.x - d.radius < pad) { d.x = pad + d.radius; d.vx = Math.abs(d.vx) * WALL_BOUNCE; }
-    if (d.x + d.radius > fieldW - pad) { d.x = fieldW - pad - d.radius; d.vx = -Math.abs(d.vx) * WALL_BOUNCE; }
-    if (d.y - d.radius < pad) { d.y = pad + d.radius; d.vy = Math.abs(d.vy) * WALL_BOUNCE; }
-    if (d.y + d.radius > fieldH - pad) { d.y = fieldH - pad - d.radius; d.vy = -Math.abs(d.vy) * WALL_BOUNCE; }
-  });
-
-  // Wall collisions for ball (except goal areas)
-  var goalW = fieldW * GOAL_WIDTH_RATIO;
-  var gx1 = (fieldW - goalW) / 2;
-  var gx2 = gx1 + goalW;
-
-  if (ball.x - ball.radius < pad) { ball.x = pad + ball.radius; ball.vx = Math.abs(ball.vx) * BALL_BOUNCE; }
-  if (ball.x + ball.radius > fieldW - pad) { ball.x = fieldW - pad - ball.radius; ball.vx = -Math.abs(ball.vx) * BALL_BOUNCE; }
-
-  // Top wall - leave gap for goal
-  if (ball.y - ball.radius < pad) {
-    if (ball.x < gx1 || ball.x > gx2) {
-      ball.y = pad + ball.radius;
-      ball.vy = Math.abs(ball.vy) * BALL_BOUNCE;
-    }
-  }
-  // Bottom wall - leave gap for goal
-  if (ball.y + ball.radius > fieldH - pad) {
-    if (ball.x < gx1 || ball.x > gx2) {
-      ball.y = fieldH - pad - ball.radius;
-      ball.vy = -Math.abs(ball.vy) * BALL_BOUNCE;
-    }
-  }
+  // Wall + goal-pocket collisions for every body (disks AND ball)
+  disks.forEach(function (d) { clampToBounds(d, WALL_BOUNCE); });
+  clampToBounds(ball, BALL_BOUNCE);
 
   // Disk-Disk collisions
   for (var i = 0; i < disks.length; i++) {
@@ -1154,6 +1159,61 @@ function updatePhysics() {
   // Disk-Ball collisions
   disks.forEach(function (d) {
     resolveCollision(d, ball, BALL_BOUNCE);
+  });
+}
+
+// Keep a body inside the pitch, but let it pass through the goal mouth into the
+// goal pocket (depth = END_PAD). The pocket has a back wall (net) and two posts
+// so disks/ball that enter can't fly off the field.
+function clampToBounds(o, bounce) {
+  var r = o.radius;
+  var goalW = fieldW * GOAL_WIDTH_RATIO;
+  var gx1 = (fieldW - goalW) / 2;
+  var gx2 = gx1 + goalW;
+  var inMouth = o.x > gx1 && o.x < gx2;
+
+  // Left / right side walls (the pockets sit well inside these, so always safe)
+  if (o.x - r < SIDE_PAD) { o.x = SIDE_PAD + r; o.vx = Math.abs(o.vx) * bounce; }
+  if (o.x + r > fieldW - SIDE_PAD) { o.x = fieldW - SIDE_PAD - r; o.vx = -Math.abs(o.vx) * bounce; }
+
+  // ── Top end ──
+  if (inMouth) {
+    if (o.y - r < 0) { o.y = r; o.vy = Math.abs(o.vy) * bounce; }          // net back wall
+    if (o.y - r < END_PAD) {                                                // posts (in pocket)
+      if (o.x - r < gx1) { o.x = gx1 + r; o.vx = Math.abs(o.vx) * bounce; }
+      if (o.x + r > gx2) { o.x = gx2 - r; o.vx = -Math.abs(o.vx) * bounce; }
+    }
+  } else if (o.y - r < END_PAD) {                                           // solid end line
+    o.y = END_PAD + r; o.vy = Math.abs(o.vy) * bounce;
+  }
+
+  // ── Bottom end ──
+  if (inMouth) {
+    if (o.y + r > fieldH) { o.y = fieldH - r; o.vy = -Math.abs(o.vy) * bounce; }
+    if (o.y + r > fieldH - END_PAD) {
+      if (o.x - r < gx1) { o.x = gx1 + r; o.vx = Math.abs(o.vx) * bounce; }
+      if (o.x + r > gx2) { o.x = gx2 - r; o.vx = -Math.abs(o.vx) * bounce; }
+    }
+  } else if (o.y + r > fieldH - END_PAD) {
+    o.y = fieldH - END_PAD - r; o.vy = -Math.abs(o.vy) * bounce;
+  }
+}
+
+// After a shot settles, push any disk that is >= 80% inside a goal back out onto
+// the pitch (a disk shouldn't be able to camp inside the net). The ball is left
+// alone — it may legitimately rest in the mouth under the 70% scoring line.
+function ejectDisksFromGoal() {
+  var goalW = fieldW * GOAL_WIDTH_RATIO;
+  var gx1 = (fieldW - goalW) / 2;
+  var gx2 = gx1 + goalW;
+  disks.forEach(function (d) {
+    var r = d.radius;
+    if (d.x <= gx1 || d.x >= gx2) return; // not in a goal mouth
+    // Fraction of the disk past the goal line (1.0 = fully inside the net).
+    var topFrac = (END_PAD - (d.y - r)) / (2 * r);
+    var botFrac = ((d.y + r) - (fieldH - END_PAD)) / (2 * r);
+    if (topFrac >= 0.8) { d.y = END_PAD + r; d.vx = 0; d.vy = 0; }
+    else if (botFrac >= 0.8) { d.y = fieldH - END_PAD - r; d.vx = 0; d.vy = 0; }
   });
 }
 
@@ -1200,7 +1260,7 @@ function checkGoal() {
   var goalW = fieldW * GOAL_WIDTH_RATIO;
   var gx1 = (fieldW - goalW) / 2;
   var gx2 = gx1 + goalW;
-  var pad = FIELD_PAD;
+  var pad = END_PAD;
   var r = ball.radius;
   // A goal counts only when 70%+ of the ball is over the goal line.
   // Fraction of the ball past the line = (line − leadingEdge) / diameter.
@@ -1321,6 +1381,10 @@ function onShotComplete() {
   var iWasShooter = currentTurn === myPlayer;
   gamePhase = "playing";
 
+  // Kick any disk that came to rest mostly inside the goal back onto the pitch,
+  // BEFORE broadcasting, so the snapshot carries the corrected positions.
+  ejectDisksFromGoal();
+
   // Only the authoritative client advances the turn. The receiver waits for the
   // shooter's snapshot to set currentTurn, so the two clients can never disagree
   // about whose turn it is (which is what let the ball revert to the fouler).
@@ -1367,10 +1431,9 @@ function botShoot() {
 function computeBotMove() {
   if (!ball) return null;
   var cfg = BOT_CFG[botDifficulty] || BOT_CFG.medium;
-  var pad = FIELD_PAD;
 
-  // Player 2 attacks the TOP goal (small y).
-  var goal = { x: fieldW / 2, y: pad + 4 };
+  // Player 2 attacks the TOP goal (small y) — aim deep into the net.
+  var goal = { x: fieldW / 2, y: END_PAD * 0.3 };
   var bgx = goal.x - ball.x, bgy = goal.y - ball.y;
   var bgLen = Math.sqrt(bgx * bgx + bgy * bgy) || 1;
   var bgnx = bgx / bgLen, bgny = bgy / bgLen; // ball -> goal direction
