@@ -5,7 +5,8 @@
 const GOALS_TO_WIN = 3;
 const DISK_RADIUS = 18;
 const BALL_RADIUS = 10;
-const GOAL_WIDTH_RATIO = 0.35;
+const GOAL_WIDTH_RATIO = 0.28;
+const FIELD_PAD = 16; // out-of-bounds margin (px). The goal nets live in this margin.
 const MAX_SHOT_POWER = 18;
 const FRICTION = 0.97;
 const STOP_THRESHOLD = 0.15;
@@ -654,131 +655,102 @@ function render() {
 }
 
 function drawField() {
+  var pad = FIELD_PAD;
+  var w = fieldW, h = fieldH;
+
   // Green field with stripe pattern
   for (var i = 0; i < 12; i++) {
     ctx.fillStyle = i % 2 === 0 ? "#3a8c28" : "#359025";
-    ctx.fillRect(0, i * fieldH / 12, fieldW, fieldH / 12);
+    ctx.fillRect(0, i * h / 12, w, h / 12);
   }
 
-  // Field border
-  var pad = 10;
-  ctx.strokeStyle = "rgba(255,255,255,0.6)";
+  ctx.strokeStyle = "rgba(255,255,255,0.7)";
+  ctx.fillStyle = "rgba(255,255,255,0.7)";
   ctx.lineWidth = 2;
-  ctx.strokeRect(pad, pad, fieldW - pad * 2, fieldH - pad * 2);
+
+  // Outer boundary (square corners, matching the sketch)
+  ctx.strokeRect(pad, pad, w - pad * 2, h - pad * 2);
 
   // Center line
   ctx.beginPath();
-  ctx.moveTo(pad, fieldH / 2);
-  ctx.lineTo(fieldW - pad, fieldH / 2);
+  ctx.moveTo(pad, h / 2);
+  ctx.lineTo(w - pad, h / 2);
   ctx.stroke();
 
-  // Center circle
+  // Center circle + kick-off dot
   ctx.beginPath();
-  ctx.arc(fieldW / 2, fieldH / 2, fieldW * 0.15, 0, Math.PI * 2);
+  ctx.arc(w / 2, h / 2, w * 0.16, 0, Math.PI * 2);
   ctx.stroke();
-
-  // Center dot
-  ctx.fillStyle = "rgba(255,255,255,0.6)";
   ctx.beginPath();
-  ctx.arc(fieldW / 2, fieldH / 2, 3, 0, Math.PI * 2);
+  ctx.arc(w / 2, h / 2, 3, 0, Math.PI * 2);
   ctx.fill();
 
-  // Penalty areas
-  var penW = fieldW * 0.5;
-  var penH = fieldH * 0.12;
-  ctx.strokeRect((fieldW - penW) / 2, pad, penW, penH);
-  ctx.strokeRect((fieldW - penW) / 2, fieldH - pad - penH, penW, penH);
+  // Penalty boxes (large) — top & bottom
+  var penW = w * 0.6, penH = h * 0.13;
+  ctx.strokeRect((w - penW) / 2, pad, penW, penH);
+  ctx.strokeRect((w - penW) / 2, h - pad - penH, penW, penH);
 
-  // Goal areas (smaller boxes)
-  var goalBoxW = fieldW * 0.3;
-  var goalBoxH = fieldH * 0.05;
-  ctx.strokeRect((fieldW - goalBoxW) / 2, pad, goalBoxW, goalBoxH);
-  ctx.strokeRect((fieldW - goalBoxW) / 2, fieldH - pad - goalBoxH, goalBoxW, goalBoxH);
+  // Goal boxes (small, 6-yard) — top & bottom
+  var gbW = w * 0.4, gbH = h * 0.06;
+  ctx.strokeRect((w - gbW) / 2, pad, gbW, gbH);
+  ctx.strokeRect((w - gbW) / 2, h - pad - gbH, gbW, gbH);
 
-  // Penalty arcs
+  // Penalty spots
+  ctx.beginPath(); ctx.arc(w / 2, pad + penH * 0.7, 2, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.arc(w / 2, h - pad - penH * 0.7, 2, 0, Math.PI * 2); ctx.fill();
+
+  // Penalty arcs (the "D") bulging into the field
+  var arcR = w * 0.13;
   ctx.beginPath();
-  ctx.arc(fieldW / 2, pad + penH, fieldW * 0.1, 0, Math.PI);
+  ctx.arc(w / 2, pad + penH, arcR, 0, Math.PI);
   ctx.stroke();
   ctx.beginPath();
-  ctx.arc(fieldW / 2, fieldH - pad - penH, fieldW * 0.1, Math.PI, Math.PI * 2);
+  ctx.arc(w / 2, h - pad - penH, arcR, Math.PI, Math.PI * 2);
   ctx.stroke();
-
-  // Corner arcs
-  var cornerR = 8;
-  ctx.beginPath(); ctx.arc(pad, pad, cornerR, 0, Math.PI / 2); ctx.stroke();
-  ctx.beginPath(); ctx.arc(fieldW - pad, pad, cornerR, Math.PI / 2, Math.PI); ctx.stroke();
-  ctx.beginPath(); ctx.arc(fieldW - pad, fieldH - pad, cornerR, Math.PI, Math.PI * 1.5); ctx.stroke();
-  ctx.beginPath(); ctx.arc(pad, fieldH - pad, cornerR, Math.PI * 1.5, Math.PI * 2); ctx.stroke();
 }
 
 function drawGoals() {
   var goalW = fieldW * GOAL_WIDTH_RATIO;
-  var goalH = 14;
   var gx = (fieldW - goalW) / 2;
+  var pad = FIELD_PAD;            // end line sits at y = pad / fieldH - pad
+  var depth = pad;               // net protrudes the full margin, outside the pitch
 
-  // Top goal (player 1's goal - opponent scores here if attacking upward)
-  ctx.fillStyle = "rgba(255,255,255,0.15)";
-  ctx.fillRect(gx, 0, goalW, goalH);
-  ctx.strokeStyle = "#fff";
-  ctx.lineWidth = 2.5;
-  ctx.beginPath();
-  ctx.moveTo(gx, goalH);
-  ctx.lineTo(gx, 2);
-  ctx.lineTo(gx + goalW, 2);
-  ctx.lineTo(gx + goalW, goalH);
-  ctx.stroke();
+  // One goal net. lineY = the goal line (end line); backY = back of the net
+  // (toward the edge of the canvas, outside the pitch).
+  function net(lineY, backY) {
+    // Net backing
+    ctx.fillStyle = "rgba(255,255,255,0.12)";
+    ctx.fillRect(gx, Math.min(lineY, backY), goalW, depth);
 
-  // Goal net lines (top)
-  ctx.strokeStyle = "rgba(255,255,255,0.3)";
-  ctx.lineWidth = 0.5;
-  for (var i = 0; i < goalW; i += 6) {
-    ctx.beginPath(); ctx.moveTo(gx + i, 2); ctx.lineTo(gx + i, goalH); ctx.stroke();
+    // Mesh (fine grid)
+    ctx.strokeStyle = "rgba(255,255,255,0.35)";
+    ctx.lineWidth = 0.6;
+    ctx.beginPath();
+    for (var x = gx + 5; x < gx + goalW; x += 7) {        // verticals
+      ctx.moveTo(x, lineY); ctx.lineTo(x, backY);
+    }
+    for (var s = 0.33; s < 1; s += 0.34) {                // horizontals
+      var y = lineY + (backY - lineY) * s;
+      ctx.moveTo(gx, y); ctx.lineTo(gx + goalW, y);
+    }
+    ctx.stroke();
+
+    // Goal frame: posts + back bar (thick white)
+    ctx.strokeStyle = "#ffffff";
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(gx, lineY);          ctx.lineTo(gx, backY);            // left post
+    ctx.moveTo(gx + goalW, lineY);  ctx.lineTo(gx + goalW, backY);    // right post
+    ctx.moveTo(gx, backY);          ctx.lineTo(gx + goalW, backY);    // back bar
+    ctx.stroke();
   }
 
-  // Bottom goal
-  ctx.fillStyle = "rgba(255,255,255,0.15)";
-  ctx.fillRect(gx, fieldH - goalH, goalW, goalH);
-  ctx.strokeStyle = "#fff";
-  ctx.lineWidth = 2.5;
-  ctx.beginPath();
-  ctx.moveTo(gx, fieldH - goalH);
-  ctx.lineTo(gx, fieldH - 2);
-  ctx.lineTo(gx + goalW, fieldH - 2);
-  ctx.lineTo(gx + goalW, fieldH - goalH);
-  ctx.stroke();
-
-  // Goal net lines (bottom)
-  ctx.strokeStyle = "rgba(255,255,255,0.3)";
-  ctx.lineWidth = 0.5;
-  for (var j = 0; j < goalW; j += 6) {
-    ctx.beginPath(); ctx.moveTo(gx + j, fieldH - goalH); ctx.lineTo(gx + j, fieldH - 2); ctx.stroke();
-  }
+  net(pad, pad - depth);                 // top goal (net above the pitch)
+  net(fieldH - pad, fieldH - pad + depth); // bottom goal (net below the pitch)
 }
 
 function drawDisks() {
   disks.forEach(function (d, idx) {
-    var isMyDisk = d.player === myPlayer;
-
-    var isCurrentTurn = d.player === currentTurn;
-    var isSelected = selectedDisk === idx;
-
-    // Glow for selectable disks
-    if (isMyDisk && isCurrentTurn && gamePhase === "playing") {
-      ctx.save();
-      ctx.beginPath();
-      ctx.arc(d.x, d.y, d.radius + 5, 0, Math.PI * 2);
-      ctx.fillStyle = "rgba(0, 229, 255, 0.25)";
-      ctx.fill();
-      if (isSelected) {
-        ctx.beginPath();
-        ctx.arc(d.x, d.y, d.radius + 8, 0, Math.PI * 2);
-        ctx.strokeStyle = "rgba(0, 229, 255, 0.7)";
-        ctx.lineWidth = 2;
-        ctx.stroke();
-      }
-      ctx.restore();
-    }
-
     // Disk body
     ctx.save();
     ctx.beginPath();
@@ -1141,7 +1113,7 @@ function updatePhysics() {
   });
 
   // Wall collisions for disks
-  var pad = 10;
+  var pad = FIELD_PAD;
   disks.forEach(function (d) {
     if (d.x - d.radius < pad) { d.x = pad + d.radius; d.vx = Math.abs(d.vx) * WALL_BOUNCE; }
     if (d.x + d.radius > fieldW - pad) { d.x = fieldW - pad - d.radius; d.vx = -Math.abs(d.vx) * WALL_BOUNCE; }
@@ -1228,15 +1200,22 @@ function checkGoal() {
   var goalW = fieldW * GOAL_WIDTH_RATIO;
   var gx1 = (fieldW - goalW) / 2;
   var gx2 = gx1 + goalW;
-  var goalDepth = 14;
+  var pad = FIELD_PAD;
+  var r = ball.radius;
+  // A goal counts only when 70%+ of the ball is over the goal line.
+  // Fraction of the ball past the line = (line − leadingEdge) / diameter.
+  // For >= 70%, the ball's centre must be 0.4 * radius beyond the line.
+  // Less than that → no goal, ball stays in play.
+  var over = 0.4 * r;
+  var inGoalX = ball.x > gx1 && ball.x < gx2;
 
   var scored = 0;
-  // Ball in top goal → Player 2 scores
-  if (ball.y - ball.radius < goalDepth && ball.x > gx1 && ball.x < gx2) {
+  // Top goal line is the top end line (y = pad) → Player 2 scores
+  if (inGoalX && ball.y <= pad - over) {
     scored = 2;
   }
-  // Ball in bottom goal → Player 1 scores
-  if (!scored && ball.y + ball.radius > fieldH - goalDepth && ball.x > gx1 && ball.x < gx2) {
+  // Bottom goal line (y = fieldH − pad) → Player 1 scores
+  if (!scored && inGoalX && ball.y >= fieldH - pad + over) {
     scored = 1;
   }
 
@@ -1388,7 +1367,7 @@ function botShoot() {
 function computeBotMove() {
   if (!ball) return null;
   var cfg = BOT_CFG[botDifficulty] || BOT_CFG.medium;
-  var pad = 10;
+  var pad = FIELD_PAD;
 
   // Player 2 attacks the TOP goal (small y).
   var goal = { x: fieldW / 2, y: pad + 4 };
@@ -1672,6 +1651,12 @@ function applyBoardSnapshot(snap) {
   } else if (snap.gamePhase !== "goal") {
     goalOverlay.classList.remove("show");
   }
+
+  // Track the goal-detection guard against the authoritative state. The receiver
+  // no longer runs resetRound() locally, so goalScored MUST be cleared here once
+  // the shooter says play has resumed — otherwise checkGoal() stays guarded
+  // forever and the next ball into the goal is ignored and lost off the field.
+  goalScored = (snap.gamePhase === "goal");
 
   pendingShot = false;
   updateScoreDisplay();
