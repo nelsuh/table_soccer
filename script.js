@@ -1529,6 +1529,8 @@ function onMatchEnd(winner) {
 
   winnerName.textContent = name;
   winnerScoreEl.textContent = score[0] + " - " + score[1];
+  goalOverlay.classList.remove("show");
+  foulOverlay.classList.remove("show");
   spawnConfetti();
   winnerOverlay.classList.add("show");
 
@@ -1726,6 +1728,16 @@ function applyBoardSnapshot(snap) {
   updateTurnIndicator();
   updateActivePanel();
 
+  // Match over: resolve as soon as ANY snapshot shows a winning score. Don't
+  // depend on a dedicated "ended" snapshot arriving (it rides the unreliable
+  // realtime channel) or on physics settling — otherwise the loser is left with
+  // no win/lose overlay while the winner sees theirs.
+  if (score[0] >= GOALS_TO_WIN || score[1] >= GOALS_TO_WIN) {
+    onMatchEnd(score[0] >= GOALS_TO_WIN ? 1 : 2);
+    render();
+    return;
+  }
+
   // If objects are still moving, run physics
   if (!allStopped()) {
     snapshotPhysics = true;
@@ -1733,10 +1745,6 @@ function applyBoardSnapshot(snap) {
     startPhysicsLoop();
   } else {
     gamePhase = snap.gamePhase || "playing";
-    if (gamePhase === "ended" && (score[0] >= GOALS_TO_WIN || score[1] >= GOALS_TO_WIN)) {
-      var winner = score[0] >= GOALS_TO_WIN ? 1 : 2;
-      onMatchEnd(winner);
-    }
   }
 
   render();
