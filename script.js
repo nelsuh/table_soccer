@@ -1323,6 +1323,52 @@ function ejectDisksFromGoal() {
     if (topFrac >= 0.8) { d.y = END_PAD + r; d.vx = 0; d.vy = 0; }
     else if (botFrac >= 0.8) { d.y = fieldH - END_PAD - r; d.vx = 0; d.vy = 0; }
   });
+  // Ejection snaps several disks onto the SAME goal-line point, so they end up
+  // stacked (looking like one "duplicated" disk). De-overlap them: ejected disks
+  // shove each other — and any disk already resting outside — apart.
+  separateRestingDisks();
+}
+
+// Keep a settled disk fully on the pitch (out of the goal pockets / off the
+// side walls). Used after de-overlapping so a push can't shove a disk back into
+// the net or off the field.
+function clampDiskToPitch(d) {
+  var r = d.radius;
+  if (d.x < SIDE_PAD + r) d.x = SIDE_PAD + r;
+  if (d.x > fieldW - SIDE_PAD - r) d.x = fieldW - SIDE_PAD - r;
+  if (d.y < END_PAD + r) d.y = END_PAD + r;
+  if (d.y > fieldH - END_PAD - r) d.y = fieldH - END_PAD - r;
+}
+
+// Positional relaxation: separate any overlapping resting disks so none stack on
+// top of another. Velocity-free (disks are at rest); a few passes converge.
+function separateRestingDisks() {
+  var ITER = 8;
+  for (var it = 0; it < ITER; it++) {
+    var moved = false;
+    for (var i = 0; i < disks.length; i++) {
+      for (var j = i + 1; j < disks.length; j++) {
+        var a = disks[i], b = disks[j];
+        var dx = b.x - a.x, dy = b.y - a.y;
+        var dist = Math.sqrt(dx * dx + dy * dy);
+        var minDist = a.radius + b.radius;
+        if (dist >= minDist) continue;
+        var nx, ny, overlap;
+        if (dist > 0.001) {
+          nx = dx / dist; ny = dy / dist; overlap = minDist - dist;
+        } else {
+          // Exact overlap (two disks ejected to the same point) — split along x
+          // so they don't stay welded together.
+          nx = 1; ny = 0; overlap = minDist;
+        }
+        a.x -= nx * overlap * 0.5; a.y -= ny * overlap * 0.5;
+        b.x += nx * overlap * 0.5; b.y += ny * overlap * 0.5;
+        clampDiskToPitch(a); clampDiskToPitch(b);
+        moved = true;
+      }
+    }
+    if (!moved) break;
+  }
 }
 
 function resolveCollision(a, b, bounce) {
