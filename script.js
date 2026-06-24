@@ -161,6 +161,9 @@ let physicsAccumulator = 0;
 let lastPhysicsTime = 0;
 let scheduledShotTimer = null;
 let pendingSnapshot = null; // snapshot received mid-animation, applied once it settles
+let netPaused = false;      // true while disconnected → freeze physics/timers until resync
+let forfeitTimer = null;    // grace countdown after an opponent leaves
+const FORFEIT_GRACE_MS = 20000;
 
 // ── Bot State ────────────────────────────────────────────
 let botMode = false;          // true = single-player vs local bot (bot is always player 2)
@@ -241,6 +244,10 @@ Usion.init(async function (config) {
   myId = config.userId;
   playerNames[myId] = config.userName || "You";
   if (config.userAvatar) playerAvatars[myId] = config.userAvatar;
+  // Canonical platform roster (playerIds[0] = host). Seed seating from it so
+  // both clients agree on player 1 vs 2 (orientation + disk ownership) even if
+  // the per-client join ack arrives in a different order.
+  if (config.playerIds && config.playerIds.length) players = config.playerIds.slice();
 
   showWaiting();
   if (config.roomId) {
@@ -261,12 +268,23 @@ async function setupMultiplayer(roomId) {
     Usion.game.onRematchRequest(onRematchRequest);
     Usion.game.onGameRestarted(onGameRestarted);
     Usion.game.onDisconnect(function () {
-      if (gamePhase !== "ended") updateTurnIndicator("Connection lost...");
+      if (botMode || gamePhase === "ended") return;
+      // Real pause: freeze any in-flight animation + bot/tactic timers so a
+      // disconnected client can't drift ahead of the others. Resync restores
+      // the authoritative state on return.
+      netPaused = true;
+      pausePhysics();
+      cancelBotMove();
+      updateTurnIndicator("Connection lost — paused…");
     });
     Usion.game.onReconnect(function () {
+      netPaused = false;
       if (gamePhase !== "ended") {
         updateTurnIndicator();
-        Usion.game.requestSync(lastSequence);
+        // Pull the host checkpoint (game_state) AND ask a peer for the live
+        // resting snapshot, so a shot that settled while we were away is caught.
+        Usion.game.requestSync(0);
+        try { Usion.game.realtime("request_state", {}); } catch (_) {}
       }
     });
     await Usion.game.join(roomId);
@@ -277,7 +295,7 @@ async function setupMultiplayer(roomId) {
 }
 
 function onJoined(data) {
-  players = data.player_ids || [];
+  if (data.player_ids && data.player_ids.length) players = data.player_ids;
   connectedCount = Number(data.connected_count || 0);
   if (data.sequence !== undefined) lastSequence = data.sequence;
 
@@ -285,6 +303,13 @@ function onJoined(data) {
     name: playerNames[myId],
     avatar: playerAvatars[myId] || null
   });
+
+  // The join ack may carry the host's checkpoint as game_state — rebuild the
+  // live match straight away so a rejoin resumes instead of sitting blank.
+  if (data.game_state && applyCheckpoint(data.game_state)) {
+    try { Usion.game.realtime("request_state", {}); } catch (_) {}
+    return;
+  }
 
   if (connectedCount >= 2 && waitingForOpponent) {
     startOnlineGame();
@@ -296,6 +321,8 @@ function onPlayerJoined(data) {
   else if (data.player && data.player.id && !players.includes(data.player.id)) players.push(data.player.id);
   if (data.player && data.player.is_connected) connectedCount = Math.max(connectedCount, 2);
 
+  if (forfeitTimer) resumeFromGrace(); // opponent came back during the grace window
+
   Usion.game.realtime("player_info", {
     name: playerNames[myId],
     avatar: playerAvatars[myId] || null
@@ -304,13 +331,63 @@ function onPlayerJoined(data) {
   if (connectedCount >= 2 && waitingForOpponent) startOnlineGame();
 }
 
-function onPlayerLeft() {
+function onPlayerLeft(data) {
+  if (data && data.player_ids && data.player_ids.length) players = data.player_ids;
   connectedCount = Math.max(0, connectedCount - 1);
-  if (gamePhase !== "ended") updateTurnIndicator("Opponent left the game");
+  if (gamePhase === "ended") return;
+  if (gamePhase === "tactics" || waitingForOpponent) {
+    updateTurnIndicator("Opponent left the game");
+    return;
+  }
+  // Mid-match: give the opponent a grace window to rejoin before forfeit.
+  startForfeitGrace();
+}
+
+// ── Forfeit grace (opponent left) ────────────────────────
+// Mirror the 13/mini_golf model: a player who drops mid-match has FORFEIT_GRACE_MS
+// to return before the remaining player wins. Input is frozen while the timer runs.
+function clearForfeitGrace() {
+  if (forfeitTimer) { clearInterval(forfeitTimer); forfeitTimer = null; }
+}
+
+function startForfeitGrace() {
+  if (botMode) return;
+  clearForfeitGrace();
+  pausePhysics();
+  cancelBotMove();
+  var secs = Math.ceil(FORFEIT_GRACE_MS / 1000);
+  updateTurnIndicator("Opponent left — waiting to rejoin… (" + secs + "s)");
+  forfeitTimer = setInterval(function () {
+    if (gamePhase === "ended" || connectedCount > 1) { clearForfeitGrace(); return; }
+    secs -= 1;
+    if (secs > 0) {
+      updateTurnIndicator("Opponent left — waiting to rejoin… (" + secs + "s)");
+      return;
+    }
+    clearForfeitGrace();
+    if (gamePhase !== "ended" && connectedCount <= 1) forfeitWin();
+  }, 1000);
+}
+
+// A peer is back → cancel the pending forfeit and reconcile state.
+function resumeFromGrace() {
+  if (!forfeitTimer) return;
+  clearForfeitGrace();
+  connectedCount = Math.max(connectedCount, 2);
+  updateTurnIndicator();
+  try { Usion.game.requestSync(0); } catch (_) {}
+}
+
+// Remaining player wins by forfeit, regardless of the running score.
+function forfeitWin() {
+  clearForfeitGrace();
+  if (gamePhase === "ended") return;
+  onMatchEnd(myPlayer || 1);
 }
 
 function onAction(data) {
   if (data.sequence !== undefined) lastSequence = Math.max(lastSequence, data.sequence);
+  if (data.player_id && data.player_id !== myId && forfeitTimer) resumeFromGrace();
 
   if (data.action_type === "shot" && data.player_id !== myId) {
     applyShot(data.action_data);
@@ -326,16 +403,36 @@ function onAction(data) {
 
 function onSync(data) {
   pendingShot = false;
-  if (data.sequence !== undefined) {
-    lastSnapshotVersion = Math.max(lastSnapshotVersion, Number(data.sequence) || 0);
-    lastSequence = data.sequence;
-  }
+  if (data.sequence !== undefined) lastSequence = data.sequence;
+
+  // Checkpoint path: once the host has setState()'d, the SDK compacts the log,
+  // so sync carries game_state (the latest settled resting board). Rebuild from
+  // it directly — the authoritative-shooter model needs no shot replay; a shot
+  // still in flight converges via the live board_state snapshot we also request.
+  if (data.game_state && applyCheckpoint(data.game_state)) return;
+
+  // No checkpoint yet (match not started) → replay the tactics actions so a
+  // late joiner / reconnect during selection still learns the opponent's pick.
   if (!data.actions || data.actions.length === 0) return;
-  // Replay from snapshot is handled via realtime board_state, not full action replay
-  // because physics replays are non-deterministic
+  data.actions.forEach(function (a) {
+    if (a.action_type === "tactics" && a.player_id !== myId) {
+      opponentAttackTactic = a.action_data.attack || "1-3-2";
+      opponentDefenseTactic = a.action_data.defense || "1-3-2";
+      opponentTacticsReceived = true;
+      tryStartMatch();
+    }
+  });
 }
 
 function onRealtime(data) {
+  // Any packet from a peer proves they're connected → cancel a pending forfeit.
+  if (data.player_id && data.player_id !== myId && forfeitTimer) resumeFromGrace();
+  if (data.action_type === "request_state" && data.player_id !== myId) {
+    // A peer rejoined and wants the live resting board. The host answers (both
+    // clients agree on a settled state, so one responder is enough).
+    if (isHostPlayer() && gamePhase !== "tactics" && !waitingForOpponent) broadcastBoardSnapshot();
+    return;
+  }
   if (data.action_type === "player_info" && data.player_id !== myId) {
     if (data.action_data.name) playerNames[data.player_id] = data.action_data.name;
     if (data.action_data.avatar) playerAvatars[data.player_id] = data.action_data.avatar;
@@ -584,6 +681,7 @@ function resetRound() {
   updateActivePanel();
   render();
   maybeTriggerBot();
+  hostCheckpoint(); // persist the fresh round so a rejoiner resumes here
 }
 
 function setupDisksAndBall() {
@@ -929,6 +1027,7 @@ function getCanvasPos(e) {
 
 function canIAct() {
   if (gamePhase !== "playing") return false;
+  if (netPaused || forfeitTimer) return false; // frozen while disconnected / awaiting rejoin
   return currentTurn === myPlayer && !pendingShot;
 }
 
@@ -1097,14 +1196,23 @@ var physicsRunning = false;
 
 function startPhysicsLoop() {
   if (physicsRunning) return;
+  if (netPaused || forfeitTimer) return; // don't animate while paused / awaiting rejoin
   physicsRunning = true;
   physicsAccumulator = 0;
   lastPhysicsTime = performance.now();
   animFrame = requestAnimationFrame(physicsStep);
 }
 
+// Freeze any in-flight animation without losing the board. The authoritative
+// settled state is restored from the host checkpoint / live snapshot on resync.
+function pausePhysics() {
+  physicsRunning = false;
+  if (animFrame) { cancelAnimationFrame(animFrame); animFrame = null; }
+}
+
 function physicsStep(now) {
   if (!physicsRunning) return;
+  if (netPaused) { physicsRunning = false; return; } // frozen mid-flight; resync restores on return
 
   var dt = now - lastPhysicsTime;
   lastPhysicsTime = now;
@@ -1371,6 +1479,7 @@ function onShotComplete() {
     updateActivePanel();
     render();
     flushPendingSnapshot();
+    hostCheckpoint(); // host-as-receiver: persist the settled board it just animated
     return;
   }
 
@@ -1397,6 +1506,7 @@ function onShotComplete() {
 
   flushPendingSnapshot();
   maybeTriggerBot();
+  hostCheckpoint(); // persist the settled board + advanced turn for rejoiners
 }
 
 // ── Bot ──────────────────────────────────────────────────
@@ -1537,6 +1647,7 @@ function onMatchEnd(winner) {
   rematchState = "idle";
   syncRematchUi();
   broadcastBoardSnapshot();
+  hostCheckpoint(); // persist the ended state so a rejoiner sees the result
 }
 
 // ── Rematch ──────────────────────────────────────────────
@@ -1657,6 +1768,58 @@ function broadcastRematchState() {
   Usion.game.realtime("rematch_state", { state: rematchState });
 }
 
+// ── Checkpoint (durable reconnect state) ─────────────────
+// The board_state snapshot rides the unreliable realtime channel, so it's gone
+// the moment a client is offline. The host (players[0]) additionally persists
+// the latest SETTLED board via setState so a (re)joining client loads it as
+// game_state and resumes instead of starting blank. Authoritative-shooter model:
+// every client animates each shot to the same resting state, so the host always
+// holds a correct checkpoint after any settle — regardless of who shot.
+function isHostPlayer() {
+  return !botMode && players.length > 0 && players[0] === myId;
+}
+
+function hostCheckpoint() {
+  if (!isHostPlayer()) return;
+  if (gamePhase === "tactics" || waitingForOpponent) return; // nothing to resume yet
+  try {
+    if (window.Usion && Usion.game && Usion.game.setState) {
+      var snap = getBoardSnapshot();
+      snap.order = players.slice();   // canonical roster (tactics already baked into disk positions)
+      Usion.game.setState(snap);
+    }
+  } catch (_) {}
+}
+
+// Rebuild a live match from a host checkpoint (join ack / sync game_state).
+// Returns true if a valid checkpoint was applied.
+function applyCheckpoint(state) {
+  if (!state || typeof state !== "object" || !Array.isArray(state.order) || !Array.isArray(state.disks)) return false;
+  if (physicsRunning && !snapshotPhysics) return false; // don't clobber a real shot we're mid-animating
+
+  players = state.order.slice();
+  myPlayer = players.indexOf(myId) + 1;
+  if (myPlayer < 1) return false; // not a seated player in this checkpoint
+
+  // Promote into a live online match: drop setup overlays + bot/tactic timers.
+  botMode = false;
+  waitingForOpponent = false;
+  netPaused = false;
+  hideWaiting();
+  tacticOverlay.classList.remove("show");
+  clearInterval(tacticTimerInterval);
+  cancelBotMove();
+  myTacticsConfirmed = true;
+  opponentTacticsReceived = true;
+  updatePlayerDisplay();
+
+  // The checkpoint carries the full board (disks/ball/score/turn/phase) in the
+  // same shape as a realtime snapshot — reuse the snapshot applier to restore it.
+  lastSnapshotVersion = 0;          // accept this checkpoint regardless of stale version
+  applyBoardSnapshot(state);
+  return true;
+}
+
 function applyBoardSnapshot(snap) {
   var v = Number(snap.version || 0);
   if (v && v < lastSnapshotVersion) return;
@@ -1745,6 +1908,7 @@ function applyBoardSnapshot(snap) {
     startPhysicsLoop();
   } else {
     gamePhase = snap.gamePhase || "playing";
+    hostCheckpoint(); // host-as-receiver: persist the authoritative settled board
   }
 
   render();
