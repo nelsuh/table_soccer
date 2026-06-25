@@ -153,6 +153,13 @@ let waitingForOpponent = false;
 let connectedCount = 0;
 let lastSequence = 0;
 let lastSnapshotVersion = 0;
+// Highest snapshot version seen PER sender. Versions are stamped from a local
+// monotonic counter (snapshotSeq), which is only ordered within one client — so
+// we must compare per-sender, never across two devices, or skew silently drops
+// valid moves and stalls the match. (Mirrors connect_four.)
+let lastSnapshotVersionByPlayer = {};
+let pendingSnapshotFrom = null;
+let snapshotSeq = 0;
 let rematchRequested = false;
 let rematchState = "idle";
 let pendingShot = false;
@@ -319,7 +326,12 @@ function onJoined(data) {
 function onPlayerJoined(data) {
   if (data.player_ids) players = data.player_ids;
   else if (data.player && data.player.id && !players.includes(data.player.id)) players.push(data.player.id);
+  if (typeof data.connected_count === "number") connectedCount = Math.max(connectedCount, data.connected_count);
+  if (Array.isArray(data.player_ids) && data.player_ids.length >= 2) connectedCount = Math.max(connectedCount, 2);
   if (data.player && data.player.is_connected) connectedCount = Math.max(connectedCount, 2);
+  // A (re)joining peer may have reloaded, restarting its snapshot counter at 0 —
+  // re-baseline per-sender versioning so its fresh snapshots aren't dropped as stale.
+  lastSnapshotVersionByPlayer = {};
 
   if (forfeitTimer) resumeFromGrace(); // opponent came back during the grace window
 
@@ -440,7 +452,7 @@ function onRealtime(data) {
     return;
   }
   if (data.action_type === "board_state" && data.player_id !== myId) {
-    applyBoardSnapshot(data.action_data);
+    applyBoardSnapshot(data.action_data, data.player_id);
     return;
   }
   if (data.action_type === "tactics_selected" && data.player_id !== myId) {
@@ -638,6 +650,10 @@ function confirmTactics() {
 
 function tryStartMatch() {
   if (!myTacticsConfirmed) return;
+  // Re-entry guard: confirmTactics sends BOTH a realtime "tactics_selected" and a
+  // durable "tactics" action, and each can land on the opponent and call us — so
+  // without this, initMatch() runs twice and re-zeroes a match already in progress.
+  if (gamePhase !== "tactics") return;
   if (!opponentTacticsReceived) {
     // Show waiting state on the tactic overlay
     tacticConfirm.textContent = "WAITING FOR OPPONENT...";
@@ -1636,8 +1652,10 @@ function computeBotMove() {
 function flushPendingSnapshot() {
   if (pendingSnapshot && !physicsRunning) {
     var s = pendingSnapshot;
+    var from = pendingSnapshotFrom;
     pendingSnapshot = null;
-    applyBoardSnapshot(s);
+    pendingSnapshotFrom = null;
+    applyBoardSnapshot(s, from);
   }
 }
 
@@ -1798,7 +1816,9 @@ function getBoardSnapshot() {
     roundShotCount: roundShotCount,
     foulActive: foulActive,
     rematchState: rematchState,
-    version: Date.now()
+    // Local monotonic counter (NOT Date.now) so versions are reliably increasing
+    // and compared per-sender without cross-device clock skew.
+    version: ++snapshotSeq
   };
 }
 
@@ -1862,22 +1882,30 @@ function applyCheckpoint(state) {
   // The checkpoint carries the full board (disks/ball/score/turn/phase) in the
   // same shape as a realtime snapshot — reuse the snapshot applier to restore it.
   lastSnapshotVersion = 0;          // accept this checkpoint regardless of stale version
+  lastSnapshotVersionByPlayer = {}; // re-baseline per-sender versioning after a rebuild
   applyBoardSnapshot(state);
   return true;
 }
 
-function applyBoardSnapshot(snap) {
+function applyBoardSnapshot(snap, senderId) {
   var v = Number(snap.version || 0);
-  if (v && v < lastSnapshotVersion) return;
+  // Per-sender staleness gate: each sender's `version` is monotonic for itself, so
+  // this drops only genuinely out-of-order packets from THAT player. The old
+  // single cross-device gate dropped valid moves whenever the two clocks skewed.
+  // (A checkpoint has no senderId → always accepted, it's authoritative.)
+  var prev = senderId ? (lastSnapshotVersionByPlayer[senderId] || 0) : 0;
+  if (senderId && v && v < prev) return;
 
   // If we're mid-animation of a real shot, don't yank objects to the snapshot's
   // resting positions — our deterministic simulation reaches the same end state.
   // Stash it and apply as a smooth correction once the animation settles.
   if (physicsRunning && !snapshotPhysics) {
     pendingSnapshot = snap;
+    pendingSnapshotFrom = senderId || null;
     return;
   }
 
+  if (senderId && v) lastSnapshotVersionByPlayer[senderId] = Math.max(prev, v);
   lastSnapshotVersion = Math.max(lastSnapshotVersion, v);
   // A newer authoritative snapshot supersedes any older one we stashed mid-shot.
   pendingSnapshot = null;
