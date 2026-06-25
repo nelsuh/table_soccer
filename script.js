@@ -123,6 +123,9 @@ let ball = null;    // {x,y,vx,vy,radius}
 let score = [0, 0]; // [player1, player2]
 let currentTurn = 1; // 1 or 2
 let gamePhase = "waiting"; // waiting | tactics | playing | animating | goal | ended
+let matchStarted = false;  // true once initMatch ran for the current match — the
+                           // re-entry guard for tryStartMatch (decoupled from
+                           // gamePhase, which incoming snapshots can mutate).
 let roundStarter = 1; // who starts after a goal
 
 let selectedDisk = null;
@@ -550,6 +553,7 @@ resetBtn.addEventListener("click", function () {
 // ── Tactic Selection ─────────────────────────────────────
 function showTacticSelection() {
   gamePhase = "tactics";
+  matchStarted = false;          // a fresh match/rematch can be started again
   myTacticsConfirmed = false;
   opponentTacticsReceived = false;
   tacticConfirm.textContent = "CONFIRM";
@@ -653,7 +657,10 @@ function tryStartMatch() {
   // Re-entry guard: confirmTactics sends BOTH a realtime "tactics_selected" and a
   // durable "tactics" action, and each can land on the opponent and call us — so
   // without this, initMatch() runs twice and re-zeroes a match already in progress.
-  if (gamePhase !== "tactics") return;
+  // Guard on matchStarted (set in initMatch, cleared in showTacticSelection), NOT
+  // gamePhase: an incoming snapshot can mutate gamePhase out of "tactics" while we
+  // are still on the formation screen, which used to block CONFIRM entirely.
+  if (matchStarted) return;
   if (!opponentTacticsReceived) {
     // Show waiting state on the tactic overlay
     tacticConfirm.textContent = "WAITING FOR OPPONENT...";
@@ -668,6 +675,7 @@ function tryStartMatch() {
 
 // ── Match Init ───────────────────────────────────────────
 function initMatch() {
+  matchStarted = true;
   score = [0, 0];
   currentTurn = 1;
   roundStarter = 1;
@@ -1888,6 +1896,11 @@ function applyCheckpoint(state) {
 }
 
 function applyBoardSnapshot(snap, senderId) {
+  // Ignore a peer's realtime snapshot while we're on the formation screen (rematch
+  // or first game). A late in-match snapshot would otherwise overwrite gamePhase
+  // and yank us out of "tactics". Checkpoints (no senderId) still apply — they
+  // legitimately promote a reconnecting client into the live match.
+  if (senderId && (gamePhase === "tactics" || waitingForOpponent)) return;
   var v = Number(snap.version || 0);
   // Per-sender staleness gate: each sender's `version` is monotonic for itself, so
   // this drops only genuinely out-of-order packets from THAT player. The old
