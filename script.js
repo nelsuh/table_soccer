@@ -420,10 +420,12 @@ function onSync(data) {
   pendingShot = false;
   if (data.sequence !== undefined) lastSequence = data.sequence;
 
-  // Checkpoint path: once the host has setState()'d, the SDK compacts the log,
-  // so sync carries game_state (the latest settled resting board). Rebuild from
-  // it directly — the authoritative-shooter model needs no shot replay; a shot
-  // still in flight converges via the live board_state snapshot we also request.
+  // Checkpoint path: any participant's setState() (actor-written, not host-only)
+  // compacts the log, so sync carries game_state (the latest settled resting
+  // board). Rebuild from it directly — the authoritative-shooter model needs no
+  // shot replay (shots ride the realtime channel, not the durable action log, so
+  // there is no tail to replay over the checkpoint); a shot still in flight
+  // converges via the live board_state snapshot onReconnect/onJoined also request.
   if (data.game_state && applyCheckpoint(data.game_state)) return;
 
   // No checkpoint yet (match not started) → replay the tactics actions so a
@@ -705,7 +707,7 @@ function resetRound() {
   updateActivePanel();
   render();
   maybeTriggerBot();
-  hostCheckpoint(); // persist the fresh round so a rejoiner resumes here
+  writeCheckpoint(); // persist the fresh round so a rejoiner resumes here
 }
 
 function setupDisksAndBall() {
@@ -1549,7 +1551,7 @@ function onShotComplete() {
     updateActivePanel();
     render();
     flushPendingSnapshot();
-    hostCheckpoint(); // host-as-receiver: persist the settled board it just animated
+    writeCheckpoint(); // receiver: persist the settled board it just animated
     return;
   }
 
@@ -1576,7 +1578,7 @@ function onShotComplete() {
 
   flushPendingSnapshot();
   maybeTriggerBot();
-  hostCheckpoint(); // persist the settled board + advanced turn for rejoiners
+  writeCheckpoint(); // shooter: persist the settled board + advanced turn for rejoiners
 }
 
 // ── Bot ──────────────────────────────────────────────────
@@ -1719,7 +1721,7 @@ function onMatchEnd(winner) {
   rematchState = "idle";
   syncRematchUi();
   broadcastBoardSnapshot();
-  hostCheckpoint(); // persist the ended state so a rejoiner sees the result
+  writeCheckpoint(); // persist the ended state so a rejoiner sees the result
 }
 
 // ── Rematch ──────────────────────────────────────────────
@@ -1844,23 +1846,31 @@ function broadcastRematchState() {
 
 // ── Checkpoint (durable reconnect state) ─────────────────
 // The board_state snapshot rides the unreliable realtime channel, so it's gone
-// the moment a client is offline. The host (players[0]) additionally persists
-// the latest SETTLED board via setState so a (re)joining client loads it as
-// game_state and resumes instead of starting blank. Authoritative-shooter model:
-// every client animates each shot to the same resting state, so the host always
-// holds a correct checkpoint after any settle — regardless of who shot.
+// the moment a client is offline. Each client ALSO persists the latest SETTLED
+// board via setState so a (re)joining client loads it as game_state and resumes
+// instead of starting blank.
+//
+// ACTOR-WRITTEN, NOT HOST-ONLY (per the SDK reference): `Usion.game.setState` is
+// NOT host-only — any participant may write the checkpoint, and that is what
+// "keeps the snapshot fresh even while the host is backgrounded." The old
+// host-only gate stranded the checkpoint whenever the host dropped. The
+// authoritative-shooter model makes this safe: every client animates each shot
+// to the SAME deterministic resting state, so whichever client writes (shooter
+// at its settle, receiver at its settle) persists the identical authoritative
+// board — last-write-wins is harmless. So writeCheckpoint() is called at every
+// settle point by whoever reaches it, with no host gate.
 function isHostPlayer() {
   return !botMode && players.length > 0 && players[0] === myId;
 }
 
-function hostCheckpoint() {
-  if (!isHostPlayer()) return;
-  if (gamePhase === "tactics" || waitingForOpponent) return; // nothing to resume yet
+function writeCheckpoint() {
+  if (botMode) return;                                          // no remote peer to recover
+  if (gamePhase === "tactics" || waitingForOpponent) return;   // nothing to resume yet
   try {
     if (window.Usion && Usion.game && Usion.game.setState) {
       var snap = getBoardSnapshot();
       snap.order = players.slice();   // canonical roster (tactics already baked into disk positions)
-      Usion.game.setState(snap);
+      Usion.game.setState(snap);      // setState is NOT host-only — actor write keeps it fresh
     }
   } catch (_) {}
 }
@@ -1995,7 +2005,7 @@ function applyBoardSnapshot(snap, senderId) {
     startPhysicsLoop();
   } else {
     gamePhase = snap.gamePhase || "playing";
-    hostCheckpoint(); // host-as-receiver: persist the authoritative settled board
+    writeCheckpoint(); // receiver: persist the authoritative settled board
   }
 
   render();
