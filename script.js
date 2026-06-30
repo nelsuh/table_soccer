@@ -1188,8 +1188,17 @@ function applyShot(data) {
   updateTurnIndicator();
   updateActivePanel();
 
+  // `startAt` is an ABSOLUTE wall-clock timestamp from the SHOOTER's device. Two
+  // devices' clocks are NOT synced, so `startAt - Date.now()` here can be wildly
+  // wrong: if the shooter's clock runs ahead of ours, the raw delay is several
+  // seconds — we'd sit idle while the shot's settle snapshot (board_state) arrives
+  // first and teleports the board to the final position, so the watcher NEVER sees
+  // the disk move (and only in one direction, matching the clock-skew sign). Clamp
+  // to [0, SHOT_START_DELAY_MS] so we always start animating promptly regardless of
+  // skew — the brief delay just keeps the two animations roughly aligned.
   var startAt = Number(data.startAt || 0);
-  var delay = Math.max(0, startAt - Date.now());
+  var delay = startAt ? (startAt - Date.now()) : 0;
+  delay = Math.max(0, Math.min(delay, SHOT_START_DELAY_MS));
 
   setTimeout(function () {
     if (diskIdx < 0 || diskIdx >= disks.length) return;
