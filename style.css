@@ -229,7 +229,7 @@ button#resetBtn:active { transform: translateY(0); }
   margin: 12px 0 10px;
   opacity: 0.8;
 }
-.tactic-timer span { font-size: 24px; font-weight: 900; }
+.tactic-timer #tacticTimer { font-size: 24px; font-weight: 900; }
 
 /* Goal overlay */
 .goal-card {
@@ -352,3 +352,9 @@ button#resetBtn:active { transform: translateY(0); }
   .tactic-grid { grid-template-columns: repeat(2, 1fr); }
   .tactic-preview { width: 60px; height: 78px; }
 }
+
+/* Platform theme (Usion.getTheme → html[data-theme]). The pitch is
+   art-directed green on every theme; only the page chrome tint follows. */
+:root[data-theme="light"] body { background: #3f7a2c; }
+:root[data-theme="light"] .topbar { background: rgba(0,0,0,0.35); }
+:root[data-theme="light"] .turn-indicator { background: rgba(0,0,0,0.28); }

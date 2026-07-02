@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
 <title>Table Soccer</title>
 <link rel="stylesheet" href="https://usions.com/usion-design-system.css">
-<link rel="stylesheet" href="style.css?v=2">
+<link rel="stylesheet" href="style.css?v=3">
 </head>
 
 <body>
@@ -15,7 +15,7 @@
   <!-- Top Bar -->
   <div class="topbar">
     <div class="player-info left" id="player1Panel">
-      <img id="player1Avatar" src="https://api.dicebear.com/7.x/bottts/svg?seed=red">
+      <img id="player1Avatar" alt="">
       <span class="player-name" id="player1Name">Player 1</span>
     </div>
     <div class="score-area">
@@ -24,10 +24,10 @@
         <span class="score-dash">:</span>
         <span class="score" id="score2">0</span>
       </div>
-      <div class="goals-info">First to 3</div>
+      <div class="goals-info" id="goalsInfo">First to 3</div>
     </div>
     <div class="player-info right" id="player2Panel">
-      <img id="player2Avatar" src="https://api.dicebear.com/7.x/bottts/svg?seed=blue">
+      <img id="player2Avatar" alt="">
       <span class="player-name" id="player2Name">Player 2</span>
     </div>
   </div>
@@ -49,9 +49,9 @@
 <div id="waitingOverlay" class="overlay">
   <div class="overlay-card">
     <div class="spinner"></div>
-    <p class="overlay-text">Waiting for opponent...</p>
+    <p class="overlay-text" id="waitingText">Waiting for opponent...</p>
     <div class="bot-options">
-      <p class="bot-label">— or play offline —</p>
+      <p class="bot-label" id="botLabel">— or play offline —</p>
       <div class="bot-diff" id="botDiff">
         <button class="bot-diff-btn selected" data-diff="easy">Easy</button>
         <button class="bot-diff-btn" data-diff="medium">Medium</button>
@@ -65,9 +65,9 @@
 <!-- Tactic Selection Overlay -->
 <div id="tacticOverlay" class="overlay">
   <div class="tactic-card">
-    <h2 class="tactic-title">SELECT YOUR FORMATION</h2>
+    <h2 class="tactic-title" id="tacticTitle">SELECT YOUR FORMATION</h2>
 
-    <h3 class="tactic-section">ATTACKING</h3>
+    <h3 class="tactic-section" id="atkSection">ATTACKING</h3>
     <div class="tactic-grid" id="attackGrid">
       <div class="tactic-option selected" data-tactic="1-3-2">
         <canvas class="tactic-preview" data-formation="atk-1-3-2"></canvas>
@@ -87,7 +87,7 @@
       </div>
     </div>
 
-    <h3 class="tactic-section">DEFENSIVE</h3>
+    <h3 class="tactic-section" id="defSection">DEFENSIVE</h3>
     <div class="tactic-grid" id="defenseGrid">
       <div class="tactic-option selected" data-tactic="1-3-2">
         <canvas class="tactic-preview" data-formation="def-1-3-2"></canvas>
@@ -107,7 +107,7 @@
       </div>
     </div>
 
-    <div class="tactic-timer">Starting game in <span id="tacticTimer">10</span></div>
+    <div class="tactic-timer"><span id="tacticTimerPre">Starting game in </span><span id="tacticTimer">10</span><span id="tacticTimerPost"></span></div>
     <button class="btn-confirm" id="tacticConfirm">CONFIRM</button>
   </div>
 </div>
@@ -115,15 +115,15 @@
 <!-- Goal Overlay -->
 <div id="goalOverlay" class="overlay">
   <div class="goal-card">
-    <div class="goal-text">GOAL!</div>
+    <div class="goal-text" id="goalText">GOAL!</div>
   </div>
 </div>
 
 <!-- Foul Overlay -->
 <div id="foulOverlay" class="overlay">
   <div class="goal-card">
-    <div class="foul-text">FOUL!</div>
-    <div class="foul-sub">First shot goal is not allowed</div>
+    <div class="foul-text" id="foulText">FOUL!</div>
+    <div class="foul-sub" id="foulSub">First shot goal is not allowed</div>
   </div>
 </div>
 
@@ -131,7 +131,7 @@
 <div id="winnerOverlay" class="overlay">
   <div class="winner-card" id="winnerCard">
     <span class="winner-emoji">⚽</span>
-    <div class="winner-label">Winner</div>
+    <div class="winner-label" id="winnerLabel">Winner</div>
     <div class="winner-name" id="winnerName">Player 1</div>
     <div class="winner-score" id="winnerScore">3 - 1</div>
     <div class="winner-actions">
@@ -141,8 +141,10 @@
   </div>
 </div>
 
+<!-- The Usion platform injects the SDK for hosted bundles; the explicit tag
+     keeps the game working self-hosted / in the devkit too. -->
 <script src="https://usions.com/usion-sdk.js"></script>
-<script src="script.js?v=18"></script>
+<script src="script.js?v=19"></script>
 
 </body>
 </html>

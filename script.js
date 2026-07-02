@@ -1,5 +1,126 @@
 // ── Table Soccer ─────────────────────────────────────────
-// Turn-based 2-player table soccer with Usion SDK
+// Turn-based 2-player table soccer for the Usion platform — open-sourced as a
+// best-practice reference for the Usion SDK (window.Usion).
+//
+// Multiplayer model: AUTHORITATIVE SHOOTER. Both clients run the same
+// deterministic fixed-timestep physics in fixed logical units, so a shot
+// animates to the identical resting state everywhere; the client who took the
+// shot is the single authority for its outcome (goal/foul/turn) and broadcasts
+// the settled board. Reconnect recovery = durable setState checkpoint +
+// live board_state push. A solo launch (Explore/GameTok) drops straight into a
+// bot match and can be promoted into a live room mid-session
+// (Usion.game.onRoomAssigned). UI is bilingual (mn/en) via the STR table +
+// Usion.getLanguage().
+
+// ── i18n ─────────────────────────────────────────────────
+// Every user-facing string lives here, chosen via the platform's language
+// setting (Usion.getLanguage()) — never hardcode UI text to one locale.
+const STR = {
+  mn: {
+    docTitle: "Ширээний хөл бөмбөг",
+    you: "Та",
+    opponent: "Өрсөлдөгч",
+    playerN: i => "Тоглогч " + i,
+    firstTo: n => "Эхний " + n + " гоол",
+    yourTurn: "Таны ээлж",
+    turnOf: n => n + " — ээлж",
+    waitingOpponent: "Өрсөлдөгчийг хүлээж байна…",
+    orOffline: "— эсвэл оффлайн тоглох —",
+    easy: "Хялбар",
+    medium: "Дунд",
+    hard: "Хэцүү",
+    playVsBot: "БОТТОЙ ТОГЛОХ",
+    botName: d => "Бот (" + d + ")",
+    selectFormation: "БАЙРЛАЛАА СОНГО",
+    attacking: "ДОВТОЛГОО",
+    defensive: "ХАМГААЛАЛТ",
+    startingInPre: "Тоглоом ",
+    startingInPost: " секундын дараа эхэлнэ",
+    confirm: "БАТЛАХ",
+    waitingOppConfirm: "ӨРСӨЛДӨГЧИЙГ ХҮЛЭЭЖ БАЙНА…",
+    goal: "ГООЛ!",
+    foul: "ФОЛ!",
+    foulSub: "Эхний цохилтын гоол тооцогдохгүй",
+    winnerLabel: "Ялагч",
+    restart: "Дахин эхлүүлэх",
+    rematch: "Дахин тоглох",
+    acceptRematch: "Зөвшөөрөх",
+    waitingDots: "Хүлээж байна…",
+    share: "Хуваалцах",
+    connLost: "Холболт тасарлаа — түр зогслоо…",
+    oppLeftGame: "Өрсөлдөгч тоглоомоос гарлаа",
+    leftGrace: s => "Өрсөлдөгч гарлаа — дахин нэгдэхийг хүлээж байна… (" + s + "с)",
+    shareText: (n, a, b) => n + " Ширээний хөл бөмбөгт " + a + "-" + b + " хожлоо! ⚽",
+    nWonTitle: "Та хожлоо! 🎉",
+    nWonBody: "Та ширээний хөл бөмбөгийн тоглолтод хожлоо",
+    nLostTitle: "Тоглолт дууслаа",
+    nLostBody: "Таны ширээний хөл бөмбөгийн тоглолт дууслаа",
+    nTurnTitle: "Таны ээлж",
+    nTurnBody: "Ширээний хөл бөмбөгт таны цохих ээлж",
+    nLeftTitle: "Өрсөлдөгч гарлаа",
+    nLeftBody: "Таны тоглолтоос өрсөлдөгч гарлаа",
+  },
+  en: {
+    docTitle: "Table Soccer",
+    you: "You",
+    opponent: "Opponent",
+    playerN: i => "Player " + i,
+    firstTo: n => "First to " + n,
+    yourTurn: "Your Turn",
+    turnOf: n => n + "'s Turn",
+    waitingOpponent: "Waiting for opponent…",
+    orOffline: "— or play offline —",
+    easy: "Easy",
+    medium: "Medium",
+    hard: "Hard",
+    playVsBot: "PLAY VS BOT",
+    botName: d => "Bot (" + d + ")",
+    selectFormation: "SELECT YOUR FORMATION",
+    attacking: "ATTACKING",
+    defensive: "DEFENSIVE",
+    startingInPre: "Starting game in ",
+    startingInPost: "",
+    confirm: "CONFIRM",
+    waitingOppConfirm: "WAITING FOR OPPONENT…",
+    goal: "GOAL!",
+    foul: "FOUL!",
+    foulSub: "First shot goal is not allowed",
+    winnerLabel: "Winner",
+    restart: "Restart",
+    rematch: "Rematch",
+    acceptRematch: "Accept Rematch",
+    waitingDots: "Waiting…",
+    share: "Share",
+    connLost: "Connection lost — paused…",
+    oppLeftGame: "Opponent left the game",
+    leftGrace: s => "Opponent left — waiting to rejoin… (" + s + "s)",
+    shareText: (n, a, b) => n + " won at Table Soccer! " + a + "-" + b + " ⚽",
+    nWonTitle: "You won! 🎉",
+    nWonBody: "You won your Table Soccer match",
+    nLostTitle: "Match over",
+    nLostBody: "Your Table Soccer match has ended",
+    nTurnTitle: "Your turn",
+    nTurnBody: "It's your shot in Table Soccer",
+    nLeftTitle: "Opponent left",
+    nLeftBody: "Your opponent left the Table Soccer match",
+  },
+};
+let LANG = "mn";
+function t(key) {
+  let v = STR[LANG] ? STR[LANG][key] : undefined;
+  if (v === undefined) v = STR.mn[key];
+  if (typeof v === "function") return v.apply(null, Array.prototype.slice.call(arguments, 1));
+  return v !== undefined ? v : key;
+}
+function detectLang() {
+  try {
+    if (window.Usion && typeof Usion.getLanguage === "function") {
+      const l = String(Usion.getLanguage() || "");
+      if (l) return /^mn/i.test(l) ? "mn" : "en";
+    }
+  } catch (_) {}
+  try { return /^mn/i.test(String(navigator.language || "mn")) ? "mn" : "en"; } catch (_) { return "mn"; }
+}
 
 // ── Constants ────────────────────────────────────────────
 const GOALS_TO_WIN = 3;
@@ -205,6 +326,52 @@ const player2Name = document.getElementById("player2Name");
 const player1Panel = document.getElementById("player1Panel");
 const player2Panel = document.getElementById("player2Panel");
 
+// ── Language / theme / avatar helpers ────────────────────
+function applyLang(lang) {
+  LANG = lang === "en" ? "en" : "mn";
+  document.documentElement.lang = LANG;
+  document.title = t("docTitle");
+  var set = function (id, key) { var el = document.getElementById(id); if (el) el.textContent = t(key); };
+  var goalsInfo = document.getElementById("goalsInfo");
+  if (goalsInfo) goalsInfo.textContent = t("firstTo", GOALS_TO_WIN);
+  set("waitingText", "waitingOpponent");
+  set("botLabel", "orOffline");
+  document.querySelectorAll(".bot-diff-btn").forEach(function (b) { b.textContent = t(b.dataset.diff); });
+  set("playBotBtn", "playVsBot");
+  set("tacticTitle", "selectFormation");
+  set("atkSection", "attacking");
+  set("defSection", "defensive");
+  set("tacticTimerPre", "startingInPre");
+  set("tacticTimerPost", "startingInPost");
+  set("tacticConfirm", "confirm");
+  set("goalText", "goal");
+  set("foulText", "foul");
+  set("foulSub", "foulSub");
+  set("winnerLabel", "winnerLabel");
+  set("resetBtn", "restart");
+  set("winnerPlayAgain", "rematch");
+  set("winnerShare", "share");
+}
+
+// Respect the platform theme. The pitch itself is art-directed (green felt on
+// every theme), so the theme only tints the page chrome via CSS.
+function applyTheme() {
+  var theme = "dark";
+  try { if (window.Usion && typeof Usion.getTheme === "function") theme = Usion.getTheme() || "dark"; } catch (_) {}
+  document.documentElement.dataset.theme = theme;
+}
+
+// Self-contained fallback avatar (initial on a colored circle) — no external
+// CDN, so the bundle works offline and inside the platform's network rules.
+function fallbackAvatar(name, hue) {
+  var initial = String(name || "?").trim().charAt(0).toUpperCase() || "?";
+  var svg = '<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64">' +
+    '<rect width="64" height="64" rx="32" fill="hsl(' + (hue || 0) + ',55%,45%)"/>' +
+    '<text x="32" y="43" font-family="sans-serif" font-size="30" font-weight="700" fill="#fff" text-anchor="middle">' + initial + '</text></svg>';
+  return "data:image/svg+xml," + encodeURIComponent(svg);
+}
+var P1_HUE = 0, P2_HUE = 215; // matches the red/blue disk teams
+
 // ── Canvas Setup ─────────────────────────────────────────
 canvas = document.getElementById("field");
 ctx = canvas.getContext("2d");
@@ -249,19 +416,53 @@ function resizeCanvas() {
 resizeCanvas();
 window.addEventListener("resize", resizeCanvas);
 
+// ── Launch mode ──────────────────────────────────────────
+// Did the platform open us solo (GameTok / Explore) rather than from a real
+// chat game-invite? Trust the launch MODE — never infer from roomId alone,
+// because a solo launch may still be handed an auto-created (standalone_) room
+// for SDK plumbing. Only a 'multiplayer' launch goes online.
+function launchedSolo(config) {
+  try {
+    var lp = {};
+    if (window.Usion && typeof Usion.getLaunchParams === "function") lp = Usion.getLaunchParams() || {};
+    if (lp.mode === "single") return true;
+    if (lp.mode === "multiplayer") return false;
+    // SDK without the mode field: boolean shortcut, then "only a non-standalone
+    // roomId is a real multiplayer room".
+    if (window.Usion && Usion.game && typeof Usion.game.isMultiplayer === "function")
+      return !Usion.game.isMultiplayer();
+    var rid = config && config.roomId ? String(config.roomId) : "";
+    return !rid || /^standalone[_-]/i.test(rid);
+  } catch (_) { return false; }
+}
+
 // ── Usion Init ───────────────────────────────────────────
 Usion.init(async function (config) {
+  applyLang(detectLang());   // the platform's language setting is known now
+  applyTheme();
   myId = config.userId;
-  playerNames[myId] = config.userName || "You";
+  playerNames[myId] = config.userName || t("you");
   if (config.userAvatar) playerAvatars[myId] = config.userAvatar;
   // Canonical platform roster (playerIds[0] = host). Seed seating from it so
   // both clients agree on player 1 vs 2 (orientation + disk ownership) even if
   // the per-client join ack arrives in a different order.
   if (config.playerIds && config.playerIds.length) players = config.playerIds.slice();
+  loadStats(); // fire-and-forget; never block init/render
 
-  showWaiting();
-  if (config.roomId) {
+  // Registered up front REGARDLESS of launch mode: a solo launch can be
+  // promoted into a live room mid-session via the host's Share button.
+  try {
+    if (Usion.game && Usion.game.onRoomAssigned) Usion.game.onRoomAssigned(function () { onRoomPromoted(); });
+  } catch (_) {}
+
+  if (!launchedSolo(config) && config.roomId) {
+    showWaiting();
     await setupMultiplayer(config.roomId);
+  } else {
+    // Solo launch (GameTok / Explore, mode 'single') → zero-tap bot match, no
+    // menu. The chat game-invite path is the only one that goes online.
+    botDifficulty = "medium";
+    startBotGame();
   }
 });
 
@@ -269,39 +470,79 @@ Usion.init(async function (config) {
 async function setupMultiplayer(roomId) {
   try {
     await Usion.game.connect();
-    Usion.game.onJoined(onJoined);
-    Usion.game.onPlayerJoined(onPlayerJoined);
-    Usion.game.onPlayerLeft(onPlayerLeft);
-    Usion.game.onAction(onAction);
-    Usion.game.onSync(onSync);
-    Usion.game.onRealtime(onRealtime);
-    Usion.game.onRematchRequest(onRematchRequest);
-    Usion.game.onGameRestarted(onGameRestarted);
-    Usion.game.onDisconnect(function () {
-      if (botMode || gamePhase === "ended") return;
-      // Real pause: freeze any in-flight animation + bot/tactic timers so a
-      // disconnected client can't drift ahead of the others. Resync restores
-      // the authoritative state on return.
-      netPaused = true;
-      pausePhysics();
-      cancelBotMove();
-      updateTurnIndicator("Connection lost — paused…");
-    });
-    Usion.game.onReconnect(function () {
-      netPaused = false;
-      if (gamePhase !== "ended") {
-        updateTurnIndicator();
-        // Pull the host checkpoint (game_state) AND ask a peer for the live
-        // resting snapshot, so a shot that settled while we were away is caught.
-        Usion.game.requestSync(0);
-        try { Usion.game.realtime("request_state", {}); } catch (_) {}
-      }
-    });
+    registerNetHandlers();
     await Usion.game.join(roomId);
   } catch (err) {
     console.error("Multiplayer failed:", err);
     hideWaiting();
   }
+}
+
+var netHandlersRegistered = false;
+function registerNetHandlers() {
+  if (netHandlersRegistered) return; // promotion can race a normal join — register once
+  netHandlersRegistered = true;
+  Usion.game.onJoined(onJoined);
+  Usion.game.onPlayerJoined(onPlayerJoined);
+  Usion.game.onPlayerLeft(onPlayerLeft);
+  Usion.game.onAction(onAction);
+  Usion.game.onSync(onSync);
+  Usion.game.onRealtime(onRealtime);
+  Usion.game.onRematchRequest(onRematchRequest);
+  Usion.game.onGameRestarted(onGameRestarted);
+  Usion.game.onDisconnect(function () {
+    if (botMode || gamePhase === "ended") return;
+    // Real pause: freeze any in-flight animation + bot/tactic timers so a
+    // disconnected client can't drift ahead of the others. Resync restores
+    // the authoritative state on return.
+    netPaused = true;
+    pausePhysics();
+    cancelBotMove();
+    updateTurnIndicator(t("connLost"));
+  });
+  Usion.game.onReconnect(function () {
+    netPaused = false;
+    if (gamePhase !== "ended") {
+      updateTurnIndicator();
+      // Pull the host checkpoint (game_state) AND ask a peer for the live
+      // resting snapshot, so a shot that settled while we were away is caught.
+      Usion.game.requestSync(0);
+      try { Usion.game.realtime("request_state", {}); } catch (_) {}
+    }
+  });
+}
+
+// Solo → host promotion (SDK ≥ 2.20): the user tapped the host's top-bar Share
+// button mid-solo and invited someone. The SDK has ALREADY updated
+// getLaunchParams().roomId and is connect()+join()ing us as playerIds[0] — our
+// job is to tear down the bot round, register the net handlers, and open the
+// waiting overlay; onJoined lands right after and the normal flow takes over.
+function onRoomPromoted() {
+  if (!botMode && !waitingForOpponent) return; // already in a live online match
+  cancelBotMove();
+  pausePhysics();
+  clearInterval(tacticTimerInterval);
+  botMode = false;
+  matchStarted = false;
+  waitingForOpponent = true;
+  connectedCount = 0;
+  gamePhase = "waiting";
+  score = [0, 0];
+  updateScoreDisplay();
+  myTacticsConfirmed = false;
+  opponentTacticsReceived = false;
+  players = [myId];
+  myPlayer = 0;
+  tacticOverlay.classList.remove("show");
+  goalOverlay.classList.remove("show");
+  foulOverlay.classList.remove("show");
+  winnerOverlay.classList.remove("show");
+  // An invite is out — playing a bot instead would fork the room's state.
+  var botOptions = document.querySelector(".bot-options");
+  if (botOptions) botOptions.style.display = "none";
+  updatePlayerDisplay();
+  showWaiting();
+  registerNetHandlers();
 }
 
 function onJoined(data) {
@@ -351,7 +592,7 @@ function onPlayerLeft(data) {
   connectedCount = Math.max(0, connectedCount - 1);
   if (gamePhase === "ended") return;
   if (gamePhase === "tactics" || waitingForOpponent) {
-    updateTurnIndicator("Opponent left the game");
+    updateTurnIndicator(t("oppLeftGame"));
     return;
   }
   // Mid-match: give the opponent a grace window to rejoin before forfeit.
@@ -371,12 +612,13 @@ function startForfeitGrace() {
   pausePhysics();
   cancelBotMove();
   var secs = Math.ceil(FORFEIT_GRACE_MS / 1000);
-  updateTurnIndicator("Opponent left — waiting to rejoin… (" + secs + "s)");
+  updateTurnIndicator(t("leftGrace", secs));
+  notifySelf(t("nLeftTitle"), t("nLeftBody"));
   forfeitTimer = setInterval(function () {
     if (gamePhase === "ended" || connectedCount > 1) { clearForfeitGrace(); return; }
     secs -= 1;
     if (secs > 0) {
-      updateTurnIndicator("Opponent left — waiting to rejoin… (" + secs + "s)");
+      updateTurnIndicator(t("leftGrace", secs));
       return;
     }
     clearForfeitGrace();
@@ -412,6 +654,13 @@ function onAction(data) {
     opponentDefenseTactic = data.action_data.defense || "1-3-2";
     opponentTacticsReceived = true;
     tryStartMatch();
+  }
+  if (data.action_type === "rematch") {
+    // Replay-safe restart. Platform mode has NO server-side restart event
+    // (requestRematch is a pure broadcast), so the accept is a STORED action:
+    // it applies on the sequenced ECHO for sender and receiver alike —
+    // exactly-once, and a rejoiner replaying the log lands in the same state.
+    if (gamePhase !== "tactics") resetForRematch(); // duplicate accepts collapse here
   }
   // pendingShot is cleared in onShotComplete after physics settle
 }
@@ -475,15 +724,20 @@ function onRealtime(data) {
 function onRematchRequest(data) {
   if (data.player_id === myId) return;
   if (rematchRequested) {
-    resetForRematch();
-    broadcastBoardSnapshot();
+    // Both pressed "Rematch" at the same time — nobody is left to "accept", so
+    // a deterministic party (the host) converts the double-request into the
+    // stored restart action; both clients reset on its echo in onAction.
+    if (isHostPlayer()) Usion.game.action("rematch", { reset: true }).catch(function () {});
     return;
   }
   rematchState = "requested";
   syncRematchUi();
 }
 
-function onGameRestarted() { resetForRematch(); }
+// Platform mode never emits game:restarted (requestRematch is a pure
+// broadcast) — kept only for direct-mode hosts that do. The stored "rematch"
+// action in onAction is the real restart path.
+function onGameRestarted() { if (gamePhase !== "tactics") resetForRematch(); }
 
 function startOnlineGame() {
   waitingForOpponent = false;
@@ -492,19 +746,19 @@ function startOnlineGame() {
   hideWaiting();
   showTacticSelection();
   Usion.game.requestSync(0);
+  ensureNotifyPermission(); // ask ONCE, at online match start (permission-gated notify)
 }
 
 // ── Player Display ───────────────────────────────────────
 function updatePlayerDisplay() {
-  var p1id = players[0], p2id = players[1];
-  if (p1id) {
-    player1Name.textContent = p1id === myId ? "You" : (playerNames[p1id] || "Opponent");
-    if (playerAvatars[p1id]) player1Avatar.src = playerAvatars[p1id];
-  }
-  if (p2id) {
-    player2Name.textContent = p2id === myId ? "You" : (playerNames[p2id] || "Opponent");
-    if (playerAvatars[p2id]) player2Avatar.src = playerAvatars[p2id];
-  }
+  setPlayerPanel(player1Name, player1Avatar, players[0], 1, P1_HUE);
+  setPlayerPanel(player2Name, player2Avatar, players[1], 2, P2_HUE);
+}
+
+function setPlayerPanel(nameEl, avatarEl, id, seat, hue) {
+  var name = !id ? t("playerN", seat) : (id === myId ? t("you") : (playerNames[id] || t("opponent")));
+  nameEl.textContent = name;
+  avatarEl.src = (id && playerAvatars[id]) || fallbackAvatar(name, hue);
 }
 
 
@@ -537,10 +791,9 @@ function startBotGame() {
   // Human is always player 1, bot is player 2.
   myPlayer = 1;
   if (!myId) myId = "me";
-  if (!playerNames[myId]) playerNames[myId] = "You";
+  if (!playerNames[myId]) playerNames[myId] = t("you");
   players = [myId, "BOT"];
-  playerNames["BOT"] = "Bot (" + botDifficulty.charAt(0).toUpperCase() + botDifficulty.slice(1) + ")";
-  playerAvatars["BOT"] = "https://api.dicebear.com/7.x/bottts/svg?seed=" + botDifficulty;
+  playerNames["BOT"] = t("botName", t(botDifficulty));
 
   updatePlayerDisplay();
   showTacticSelection();
@@ -558,7 +811,7 @@ function showTacticSelection() {
   matchStarted = false;          // a fresh match/rematch can be started again
   myTacticsConfirmed = false;
   opponentTacticsReceived = false;
-  tacticConfirm.textContent = "CONFIRM";
+  tacticConfirm.textContent = t("confirm");
   tacticConfirm.disabled = false;
   tacticOverlay.classList.add("show");
   goalOverlay.classList.remove("show");
@@ -665,12 +918,12 @@ function tryStartMatch() {
   if (matchStarted) return;
   if (!opponentTacticsReceived) {
     // Show waiting state on the tactic overlay
-    tacticConfirm.textContent = "WAITING FOR OPPONENT...";
+    tacticConfirm.textContent = t("waitingOppConfirm");
     tacticConfirm.disabled = true;
     return;
   }
   tacticOverlay.classList.remove("show");
-  tacticConfirm.textContent = "CONFIRM";
+  tacticConfirm.textContent = t("confirm");
   tacticConfirm.disabled = false;
   initMatch();
 }
@@ -678,6 +931,7 @@ function tryStartMatch() {
 // ── Match Init ───────────────────────────────────────────
 function initMatch() {
   matchStarted = true;
+  statsRecordedThisGame = false; // each match records my outcome exactly once
   score = [0, 0];
   currentTurn = 1;
   roundStarter = 1;
@@ -1503,6 +1757,7 @@ function onGoalScored(scoringPlayer) {
     gamePhase = "goal";
     render();
     flushPendingSnapshot();
+    scheduleStaleWatchdog(); // self-heal if the shooter's score/reset snapshot is lost
     return;
   }
 
@@ -1588,6 +1843,7 @@ function onShotComplete() {
   flushPendingSnapshot();
   maybeTriggerBot();
   writeCheckpoint(); // shooter: persist the settled board + advanced turn for rejoiners
+  if (!iWasShooter) scheduleStaleWatchdog(); // receiver: self-heal a lost settle snapshot
 }
 
 // ── Bot ──────────────────────────────────────────────────
@@ -1667,6 +1923,33 @@ function computeBotMove() {
   return { diskIndex: best, vx: rx * power, vy: ry * power };
 }
 
+// ── Staleness watchdog ───────────────────────────────────
+// The settle snapshot (score/turn/reset) rides the fire-and-forget realtime
+// channel. On the platform's websocket transport it isn't randomly lost, but a
+// reference implementation should self-heal anyway (and survive
+// simulateNetwork loss): if we're still frozen on the same opponent turn / the
+// same goal overlay a few seconds after settling, pull the durable checkpoint
+// (the shooter wrote it at settle, with the advanced turn) and ask the host
+// for the live board. Both paths are idempotent, so a false positive (the
+// opponent just aiming slowly) costs one harmless resync.
+var staleTimer = null;
+function scheduleStaleWatchdog() {
+  if (botMode) return;
+  if (staleTimer) clearTimeout(staleTimer);
+  var snapTurn = currentTurn, snapPhase = gamePhase;
+  staleTimer = setTimeout(function () {
+    staleTimer = null;
+    if (physicsRunning || netPaused || forfeitTimer || pendingShot) return;
+    var stuckTurn = gamePhase === "playing" && currentTurn === snapTurn && currentTurn !== myPlayer;
+    var stuckGoal = gamePhase === "goal" && snapPhase === "goal";
+    if (stuckTurn || stuckGoal) {
+      try { Usion.game.requestSync(0); } catch (_) {}
+      try { Usion.game.realtime("request_state", {}); } catch (_) {}
+      scheduleStaleWatchdog(); // re-arm: the heal itself can be lost on a bad link
+    }
+  }, 3500);
+}
+
 // Apply a snapshot that arrived while we were animating, now that we've settled.
 function flushPendingSnapshot() {
   if (pendingSnapshot && !physicsRunning) {
@@ -1699,9 +1982,11 @@ function updateTurnIndicator(text) {
 
   var isMyTurn = currentTurn === myPlayer;
   var turnPlayerId = players[currentTurn - 1];
-  var name = turnPlayerId === myId ? "Your" : ((playerNames[turnPlayerId] || "Opponent") + "'s");
-  turnIndicator.textContent = name + " Turn";
+  turnIndicator.textContent = turnPlayerId === myId
+    ? t("yourTurn")
+    : t("turnOf", playerNames[turnPlayerId] || t("opponent"));
   turnIndicator.className = "turn-indicator " + (isMyTurn ? "my-turn" : "opp-turn");
+  maybeNotifyTurn();
 }
 
 function updateActivePanel() {
@@ -1716,9 +2001,8 @@ function onMatchEnd(winner) {
   gamePhase = "ended";
 
   var winnerIdx = winner - 1;
-  var name;
   var wId = players[winnerIdx];
-  name = wId === myId ? "You" : (playerNames[wId] || "Opponent");
+  var name = wId === myId ? t("you") : (playerNames[wId] || t("opponent"));
 
   winnerName.textContent = name;
   winnerScoreEl.textContent = score[0] + " - " + score[1];
@@ -1731,6 +2015,7 @@ function onMatchEnd(winner) {
   syncRematchUi();
   broadcastBoardSnapshot();
   writeCheckpoint(); // persist the ended state so a rejoiner sees the result
+  recordOutcome(winner === myPlayer); // stats + leaderboard + saveResult + notify
 }
 
 // ── Rematch ──────────────────────────────────────────────
@@ -1749,9 +2034,15 @@ function requestRematch() {
 
 function acceptRematch() {
   rematchRequested = true;
-  resetForRematch();
-  broadcastBoardSnapshot();
-  Usion.game.requestRematch();
+  winnerPlayAgain.textContent = t("waitingDots");
+  winnerPlayAgain.disabled = true;
+  // The restart itself is a DURABLE stored action (see onAction "rematch") —
+  // we reset when our own echo comes back, so both clients restart from the
+  // same sequenced point and a reconnect can never lose the restart.
+  Usion.game.action("rematch", { reset: true }).catch(function () {
+    rematchRequested = false;
+    syncRematchUi();
+  });
 }
 
 function resetForRematch() {
@@ -1761,6 +2052,7 @@ function resetForRematch() {
   goalScored = false;
   pendingSnapshot = null;
   lastSnapshotVersion = 0;
+  lastSnapshotVersionByPlayer = {};
   score = [0, 0];
   currentTurn = 1;
   roundStarter = 1;
@@ -1774,7 +2066,7 @@ function resetForRematch() {
   winnerOverlay.classList.remove("show");
   goalOverlay.classList.remove("show");
   foulOverlay.classList.remove("show");
-  winnerPlayAgain.textContent = "Rematch";
+  winnerPlayAgain.textContent = t("rematch");
   winnerPlayAgain.disabled = false;
   _rematchAction = requestRematch;
 
@@ -1798,17 +2090,17 @@ function syncRematchUi() {
   if (gamePhase !== "ended") return;
   if (rematchState === "requested") {
     if (rematchRequested) {
-      winnerPlayAgain.textContent = "Waiting...";
+      winnerPlayAgain.textContent = t("waitingDots");
       winnerPlayAgain.disabled = true;
       _rematchAction = null;
     } else {
-      winnerPlayAgain.textContent = "Accept Rematch";
+      winnerPlayAgain.textContent = t("acceptRematch");
       winnerPlayAgain.disabled = false;
       _rematchAction = acceptRematch;
     }
     return;
   }
-  winnerPlayAgain.textContent = "Rematch";
+  winnerPlayAgain.textContent = t("rematch");
   winnerPlayAgain.disabled = false;
   _rematchAction = requestRematch;
 }
@@ -1851,6 +2143,111 @@ function broadcastBoardSnapshot() {
 function broadcastRematchState() {
   if (botMode) return;
   Usion.game.realtime("rematch_state", { state: rematchState });
+}
+
+// ── Usion capabilities: cloud stats · leaderboard · notify · saveResult ──
+// All wrappers are defensive: missing modules / standalone preview must never
+// throw (a thrown error in init blanks the game). They no-op gracefully.
+var myStats = { wins: 0, losses: 0, games: 0 };
+var statsRecordedThisGame = false;
+var lastTurnNotified = false;
+var STATS_KEY = "table_soccer:stats";
+
+// Cross-device stats: prefer Cloud KV, fall back to localStorage cache.
+async function loadStats() {
+  try {
+    if (window.Usion && Usion.cloud) {
+      var remote = await Usion.cloud.get(STATS_KEY);
+      if (remote && typeof remote === "object") {
+        myStats = Object.assign(myStats, remote);
+        try { localStorage.setItem(STATS_KEY, JSON.stringify(myStats)); } catch (_) {}
+        return;
+      }
+    }
+  } catch (_) {}
+  try {
+    var raw = localStorage.getItem(STATS_KEY);
+    if (raw) myStats = Object.assign(myStats, JSON.parse(raw));
+  } catch (_) {}
+}
+
+function persistStats() {
+  try { localStorage.setItem(STATS_KEY, JSON.stringify(myStats)); } catch (_) {}
+  try { if (window.Usion && Usion.cloud) Usion.cloud.set(STATS_KEY, myStats); } catch (_) {}
+}
+
+function submitLeaderboard() {
+  try {
+    if (window.Usion && Usion.leaderboard) {
+      // Score = total cumulative wins; ranked highest-first.
+      Usion.leaderboard.submit(myStats.wins, { games: myStats.games });
+    }
+  } catch (_) {}
+}
+
+// Notifications are permission-gated (SDK ≥ 2.17): without a grant,
+// Usion.notify.send() returns delivered:'blocked'. We ask ONCE when an online
+// match starts, remember the answer, and only send while the app is hidden
+// (foreground play doesn't need a banner about itself). The host prefixes the
+// app's name as the notification title, so `title` here is the actual message.
+var notifyAsked = false;
+var notifyGranted = false;
+async function ensureNotifyPermission() {
+  if (notifyAsked) return;
+  notifyAsked = true;
+  try {
+    if (window.Usion && Usion.permissions && Usion.permissions.request) {
+      var res = await Usion.permissions.request(["notifications"]);
+      notifyGranted = !!(res && (res.granted === true || (res.permissions && res.permissions.notifications)));
+    }
+  } catch (_) {}
+}
+
+function notifySelf(title, body) {
+  try {
+    if (notifyGranted && window.Usion && Usion.notify && document.hidden) {
+      var p = Usion.notify.send({ title: title, body: body });
+      if (p && p.catch) p.catch(function () {});
+    }
+  } catch (_) {}
+}
+
+// Record MY outcome exactly once per online match (idempotent across the
+// shooter/receiver/forfeit end paths, which can all reach onMatchEnd).
+function recordOutcome(iWon) {
+  if (statsRecordedThisGame || botMode) return;
+  statsRecordedThisGame = true;
+  myStats.games += 1;
+  if (iWon) {
+    myStats.wins += 1;
+    notifySelf(t("nWonTitle"), t("nWonBody"));
+  } else {
+    myStats.losses += 1;
+    notifySelf(t("nLostTitle"), t("nLostBody"));
+  }
+  persistStats();
+  submitLeaderboard();
+  try { if (window.Usion && Usion.cloud && Usion.cloud.shared) Usion.cloud.shared.incr("games_total", 1); } catch (_) {}
+  try {
+    if (window.Usion && Usion.saveResult) {
+      var p = Usion.saveResult(
+        { result: iWon ? "win" : "loss", score: score[0] + "-" + score[1] },
+        { title: t("docTitle"), type: "match" }
+      );
+      if (p && p.catch) p.catch(function () {});
+    }
+  } catch (_) {}
+}
+
+// Nudge a hidden player when it becomes their turn (once per turn).
+function maybeNotifyTurn() {
+  if (botMode || gamePhase !== "playing" || !myPlayer) { lastTurnNotified = false; return; }
+  var myTurn = currentTurn === myPlayer;
+  if (myTurn && document.hidden && !lastTurnNotified) {
+    lastTurnNotified = true;
+    notifySelf(t("nTurnTitle"), t("nTurnBody"));
+  }
+  if (!myTurn) lastTurnNotified = false;
 }
 
 // ── Checkpoint (durable reconnect state) ─────────────────
@@ -2022,12 +2419,12 @@ function applyBoardSnapshot(snap, senderId) {
 
 // ── Share ────────────────────────────────────────────────
 winnerShare.addEventListener("click", function () {
-  var name = winnerName.textContent;
+  var text = t("shareText", winnerName.textContent, score[0], score[1]);
   Usion.share({
     contentType: "text",
-    text: name + " won at Table Soccer! " + score[0] + "-" + score[1] + " ⚽",
-    title: "Table Soccer",
-    message: name + " won at Table Soccer! ⚽"
+    text: text,
+    title: t("docTitle"),
+    message: text
   });
 });
 
@@ -2049,4 +2446,10 @@ function spawnConfetti() {
 }
 
 // ── Boot ─────────────────────────────────────────────────
+// Standalone (no host) still renders localized with fallback avatars;
+// Usion.init re-applies both once the platform config is known.
+applyLang(detectLang());
+applyTheme();
+player1Avatar.src = fallbackAvatar(t("playerN", 1), P1_HUE);
+player2Avatar.src = fallbackAvatar(t("playerN", 2), P2_HUE);
 render();
