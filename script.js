@@ -796,7 +796,21 @@ function startBotGame() {
   playerNames["BOT"] = t("botName", t(botDifficulty));
 
   updatePlayerDisplay();
-  showTacticSelection();
+  startBotMatchNow();
+}
+
+// GameTok contract: a solo launch must be playable with ZERO taps — skip the
+// formation overlay entirely. The human keeps the "1-3-2" defaults and the bot
+// randomizes, exactly like confirmTactics does; the countdown never starts.
+function startBotMatchNow() {
+  clearInterval(tacticTimerInterval);
+  matchStarted = false;          // a fresh match/rematch can be started again
+  myTacticsConfirmed = true;
+  var keys = Object.keys(FORMATIONS);
+  opponentAttackTactic = keys[Math.floor(Math.random() * keys.length)];
+  opponentDefenseTactic = keys[Math.floor(Math.random() * keys.length)];
+  opponentTacticsReceived = true;
+  tryStartMatch();
 }
 
 
@@ -2078,6 +2092,7 @@ function resetForRematch() {
     o.classList.toggle("selected", i === 0);
   });
 
+  if (botMode) { startBotMatchNow(); return; } // solo rematch is also zero-tap
   showTacticSelection();
 }
 
