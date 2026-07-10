@@ -105,7 +105,7 @@ const STR = {
     nLeftBody: "Your opponent left the Table Soccer match",
   },
 };
-let LANG = "mn";
+let LANG = "en";
 function t(key) {
   let v = STR[LANG] ? STR[LANG][key] : undefined;
   if (v === undefined) v = STR.mn[key];
@@ -113,10 +113,14 @@ function t(key) {
   return v !== undefined ? v : key;
 }
 function detectLang() {
-  // This game ships Mongolian, so it always opens in Mongolian regardless of the
-  // platform/browser language. The English (STR.en) table stays only as an
-  // internal fallback for any key missing from STR.mn.
-  return "mn";
+  // This game defaults to English. It reads the platform language when available
+  // and only switches to Mongolian if that language is explicitly Mongolian.
+  try {
+    const pl = (typeof Usion !== "undefined" && Usion.getLanguage && Usion.getLanguage()) ||
+               (navigator.language || "");
+    if (String(pl).toLowerCase().indexOf("mn") === 0) return "mn";
+  } catch (_) {}
+  return "en";
 }
 
 // ── Constants ────────────────────────────────────────────
