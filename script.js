@@ -2270,15 +2270,8 @@ function recordOutcome(iWon) {
   persistStats();
   submitLeaderboard();
   try { if (window.Usion && Usion.cloud && Usion.cloud.shared) Usion.cloud.shared.incr("games_total", 1); } catch (_) {}
-  try {
-    if (window.Usion && Usion.saveResult) {
-      var p = Usion.saveResult(
-        { result: iWon ? "win" : "loss", score: score[0] + "-" + score[1] },
-        { title: t("docTitle"), type: "match" }
-      );
-      if (p && p.catch) p.catch(function () {});
-    }
-  } catch (_) {}
+  // Match result is delivered as a card in the two players' DM (see
+  // reportMatchToGameCenter -> Usion.game.reportResult); no saveResult channel.
 }
 
 // Nudge a hidden player when it becomes their turn (once per turn).
