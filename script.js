@@ -297,6 +297,10 @@ let netPaused = false;      // true while disconnected → freeze physics/timers
 let forfeitTimer = null;    // grace countdown after an opponent leaves
 const FORFEIT_GRACE_MS = 20000;
 
+// Monotonic per-match counter — makes each match's Game Center result report
+// idempotent (dedupes ack retries; a rematch is a genuinely new match).
+let matchSeq = 0;
+
 // ── Bot State ────────────────────────────────────────────
 let botMode = false;          // true = single-player vs local bot (bot is always player 2)
 let botDifficulty = "easy";   // easy | medium | hard
@@ -2031,6 +2035,28 @@ function onMatchEnd(winner) {
   broadcastBoardSnapshot();
   writeCheckpoint(); // persist the ended state so a rejoiner sees the result
   recordOutcome(winner === myPlayer); // stats + leaderboard + saveResult + notify
+  reportMatchToGameCenter(winner);    // Game Center drops a result card to both players
+}
+
+// Report the final 1-on-1 result so Game Center messages BOTH players a card
+// ("You beat Bob — 3 : 1" / "Bob beat you — 1 : 3"). Host-authoritative: only
+// player_ids[0] reports, exactly once per match; the backend re-validates the
+// roster and dedupes. Skipped vs the local bot (no real opponent).
+function reportMatchToGameCenter(winner) {
+  matchSeq++;
+  if (botMode || players.length !== 2 || myId !== players[0]) return;
+  if (!Usion.game || typeof Usion.game.reportResult !== "function") return; // older injected SDK
+  var scores = {};
+  scores[players[0]] = score[0];
+  scores[players[1]] = score[1];
+  try {
+    Usion.game.reportResult({
+      winnerId: players[winner - 1],
+      scores: scores,
+      metric: "goals",
+      matchId: "m" + matchSeq,
+    }).catch(function () {}); // fire-and-forget — never block the win screen
+  } catch (e) { /* ignore */ }
 }
 
 // ── Rematch ──────────────────────────────────────────────
