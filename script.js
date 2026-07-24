@@ -2222,7 +2222,7 @@ function submitLeaderboard() {
   try {
     if (window.Usion && Usion.leaderboard) {
       // Score = total cumulative wins; ranked highest-first.
-      Usion.leaderboard.submit(myStats.wins, { games: myStats.games });
+      Usion.leaderboard.submit(myStats.wins);
     }
   } catch (_) {}
 }
