@@ -126,6 +126,8 @@ function detectLang() {
 // ── Constants ────────────────────────────────────────────
 const GOALS_TO_WIN = 3;
 const DISK_RADIUS = 18;
+const GOALKEEPER_RADIUS = 21;
+const GOALKEEPER_SPEED_MULTIPLIER = 0.85;
 const BALL_RADIUS = 10;
 const GOAL_WIDTH_RATIO = 0.40; // goal-mouth width as a fraction of field width
 const SIDE_PAD = 16;  // left/right wall inset (px)
@@ -1006,24 +1008,28 @@ function setupDisksAndBall() {
     FORMATIONS[p2AtkForm].atk : FORMATIONS[p2DefForm].def;
 
   // Player 1 disks (top side) - mirror the positions
-  p1Form.forEach(function (pos) {
+  p1Form.forEach(function (pos, index) {
+    var isGoalkeeper = index === 0;
     disks.push({
       x: pos.x * fieldW,
       y: (1 - pos.y) * fieldH,  // flip vertically for top player
       vx: 0, vy: 0,
       player: 1,
-      radius: DISK_RADIUS
+      goalkeeper: isGoalkeeper,
+      radius: isGoalkeeper ? GOALKEEPER_RADIUS : DISK_RADIUS
     });
   });
 
   // Player 2 disks (bottom side)
-  p2Form.forEach(function (pos) {
+  p2Form.forEach(function (pos, index) {
+    var isGoalkeeper = index === 0;
     disks.push({
       x: pos.x * fieldW,
       y: pos.y * fieldH,
       vx: 0, vy: 0,
       player: 2,
-      radius: DISK_RADIUS
+      goalkeeper: isGoalkeeper,
+      radius: isGoalkeeper ? GOALKEEPER_RADIUS : DISK_RADIUS
     });
   });
 
@@ -1490,8 +1496,9 @@ function applyShot(data) {
 function executeShot(data) {
   var d = disks[data.diskIndex];
   if (!d) return;
-  d.vx = data.vx;
-  d.vy = data.vy;
+  var speedMultiplier = d.goalkeeper ? GOALKEEPER_SPEED_MULTIPLIER : 1;
+  d.vx = data.vx * speedMultiplier;
+  d.vy = data.vy * speedMultiplier;
   roundShotCount++;
 
   snapshotPhysics = false;
@@ -2159,7 +2166,11 @@ function applyRematchState(payload) {
 function getBoardSnapshot() {
   return {
     disks: disks.map(function (d) {
-      return { x: d.x / fieldW, y: d.y / fieldH, vx: d.vx / fieldW, vy: d.vy / fieldH, player: d.player };
+      return {
+        x: d.x / fieldW, y: d.y / fieldH,
+        vx: d.vx / fieldW, vy: d.vy / fieldH,
+        player: d.player, goalkeeper: !!d.goalkeeper
+      };
     }),
     ball: { x: ball.x / fieldW, y: ball.y / fieldH, vx: ball.vx / fieldW, vy: ball.vy / fieldH },
     score: score.slice(),
@@ -2375,11 +2386,16 @@ function applyBoardSnapshot(snap, senderId) {
   pendingSnapshot = null;
 
   if (Array.isArray(snap.disks)) {
-    disks = snap.disks.map(function (d) {
+    disks = snap.disks.map(function (d, index) {
+      // Older snapshots predate the explicit role flag; disk 0 for each team
+      // has always been the goalkeeper in the canonical formation order.
+      var isGoalkeeper = d.goalkeeper === true || index % 6 === 0;
       return {
         x: d.x * fieldW, y: d.y * fieldH,
         vx: (d.vx || 0) * fieldW, vy: (d.vy || 0) * fieldH,
-        player: d.player, radius: DISK_RADIUS
+        player: d.player,
+        goalkeeper: isGoalkeeper,
+        radius: isGoalkeeper ? GOALKEEPER_RADIUS : DISK_RADIUS
       };
     });
   }
