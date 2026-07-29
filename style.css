@@ -3,9 +3,7 @@
 body {
   min-height: 100vh;
   min-height: 100dvh;
-  background:
-    radial-gradient(circle at 50% 42%, rgba(79,155,55,0.42), rgba(5,18,8,0.86) 72%),
-    url("assets/grass-turf.webp") center / 420px 420px repeat;
+  background: #2d5a1e;
   font-family: system-ui, sans-serif;
   display: flex;
   align-items: center;
