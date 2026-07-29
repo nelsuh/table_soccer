@@ -369,7 +369,17 @@ ctx = canvas.getContext("2d");
 
 function resizeCanvas() {
   const container = canvas.parentElement;
-  const maxW = Math.min(container.clientWidth, 400);
+  const containerStyle = window.getComputedStyle(container);
+  const contentW = container.clientWidth -
+                   parseFloat(containerStyle.paddingLeft || 0) -
+                   parseFloat(containerStyle.paddingRight || 0);
+  // Leave a small grab area around the pitch on phones. Without this inset the
+  // inline canvas width could consume the container padding too, putting edge
+  // players directly against the screen bezel where an outward drag is hard.
+  const compactScreen = window.matchMedia("(pointer: coarse)").matches ||
+                        window.innerWidth <= 600;
+  const touchInset = compactScreen ? 8 : 0;
+  const maxW = Math.min(Math.max(contentW - touchInset * 2, 1), 400);
   // Calculate available height: viewport minus topbar, turn indicator, controls, and padding
   var topbar = document.querySelector(".topbar");
   var turnInd = document.getElementById("turnIndicator");
@@ -377,7 +387,8 @@ function resizeCanvas() {
   var usedHeight = (topbar ? topbar.offsetHeight : 0) +
                    (turnInd ? turnInd.offsetHeight : 0) +
                    (controls ? controls.offsetHeight : 0) + 40; // 40px for margins/padding
-  var availH = window.innerHeight - usedHeight;
+  var viewportH = window.visualViewport ? window.visualViewport.height : window.innerHeight;
+  var availH = viewportH - usedHeight - touchInset * 2;
 
   // Keep a fixed 2:3 aspect (matching the logical field) so circles never
   // distort and both clients share the same geometry. Fit within width and
@@ -406,6 +417,7 @@ function resizeCanvas() {
 }
 resizeCanvas();
 window.addEventListener("resize", resizeCanvas);
+if (window.visualViewport) window.visualViewport.addEventListener("resize", resizeCanvas);
 
 // ── Launch mode ──────────────────────────────────────────
 // Did the platform open us solo (GameTok / Explore) rather than from a real
