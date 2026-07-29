@@ -381,7 +381,7 @@ function resizeCanvas() {
                         window.innerWidth <= 600;
   // A wider mobile margin gives the player enough physical room to pull back
   // when a disk is against a sideline or corner.
-  const touchInset = compactScreen ? 20 : 0;
+  const touchInset = compactScreen ? 32 : 0;
   const maxW = Math.min(Math.max(contentW - touchInset * 2, 1), 400);
   // Calculate available height: viewport minus the UI above the field and padding
   var topbar = document.querySelector(".topbar");
