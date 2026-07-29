@@ -51,14 +51,6 @@ const STR = {
     oppLeftGame: "Өрсөлдөгч тоглоомоос гарлаа",
     leftGrace: s => "Өрсөлдөгч гарлаа — дахин нэгдэхийг хүлээж байна… (" + s + "с)",
     shareText: (n, a, b) => n + " Ширээний хөл бөмбөгт " + a + "-" + b + " хожлоо! ⚽",
-    nWonTitle: "Та хожлоо! 🎉",
-    nWonBody: "Та ширээний хөл бөмбөгийн тоглолтод хожлоо",
-    nLostTitle: "Тоглолт дууслаа",
-    nLostBody: "Таны ширээний хөл бөмбөгийн тоглолт дууслаа",
-    nTurnTitle: "Таны ээлж",
-    nTurnBody: "Ширээний хөл бөмбөгт таны цохих ээлж",
-    nLeftTitle: "Өрсөлдөгч гарлаа",
-    nLeftBody: "Таны тоглолтоос өрсөлдөгч гарлаа",
   },
   en: {
     docTitle: "Table Soccer",
@@ -95,14 +87,6 @@ const STR = {
     oppLeftGame: "Opponent left the game",
     leftGrace: s => "Opponent left — waiting to rejoin… (" + s + "s)",
     shareText: (n, a, b) => n + " won at Table Soccer! " + a + "-" + b + " ⚽",
-    nWonTitle: "You won! 🎉",
-    nWonBody: "You won your Table Soccer match",
-    nLostTitle: "Match over",
-    nLostBody: "Your Table Soccer match has ended",
-    nTurnTitle: "Your turn",
-    nTurnBody: "It's your shot in Table Soccer",
-    nLeftTitle: "Opponent left",
-    nLeftBody: "Your opponent left the Table Soccer match",
   },
 };
 let LANG = "en";
@@ -620,7 +604,6 @@ function startForfeitGrace() {
   cancelBotMove();
   var secs = Math.ceil(FORFEIT_GRACE_MS / 1000);
   updateTurnIndicator(t("leftGrace", secs));
-  notifySelf(t("nLeftTitle"), t("nLeftBody"));
   forfeitTimer = setInterval(function () {
     if (gamePhase === "ended" || connectedCount > 1) { clearForfeitGrace(); return; }
     secs -= 1;
@@ -753,7 +736,6 @@ function startOnlineGame() {
   hideWaiting();
   showTacticSelection();
   Usion.game.requestSync(0);
-  ensureNotifyPermission(); // ask ONCE, at online match start (permission-gated notify)
 }
 
 // ── Player Display ───────────────────────────────────────
@@ -2012,7 +1994,6 @@ function updateTurnIndicator(text) {
     ? t("yourTurn")
     : t("turnOf", playerNames[turnPlayerId] || t("opponent"));
   turnIndicator.className = "turn-indicator " + (isMyTurn ? "my-turn" : "opp-turn");
-  maybeNotifyTurn();
 }
 
 function updateActivePanel() {
@@ -2041,7 +2022,7 @@ function onMatchEnd(winner) {
   syncRematchUi();
   broadcastBoardSnapshot();
   writeCheckpoint(); // persist the ended state so a rejoiner sees the result
-  recordOutcome(winner === myPlayer); // stats + leaderboard + saveResult + notify
+  recordOutcome(winner === myPlayer); // stats + leaderboard + saveResult
   reportMatchToGameCenter(winner);    // Game Center drops a result card to both players
 }
 
@@ -2198,12 +2179,11 @@ function broadcastRematchState() {
   Usion.game.realtime("rematch_state", { state: rematchState });
 }
 
-// ── Usion capabilities: cloud stats · leaderboard · notify · saveResult ──
+// ── Usion capabilities: cloud stats · leaderboard · saveResult ──
 // All wrappers are defensive: missing modules / standalone preview must never
 // throw (a thrown error in init blanks the game). They no-op gracefully.
 var myStats = { wins: 0, losses: 0, games: 0 };
 var statsRecordedThisGame = false;
-var lastTurnNotified = false;
 var STATS_KEY = "table_soccer:stats";
 
 // Cross-device stats: prefer Cloud KV, fall back to localStorage cache.
@@ -2238,33 +2218,6 @@ function submitLeaderboard() {
   } catch (_) {}
 }
 
-// Notifications are permission-gated (SDK ≥ 2.17): without a grant,
-// Usion.notify.send() returns delivered:'blocked'. We ask ONCE when an online
-// match starts, remember the answer, and only send while the app is hidden
-// (foreground play doesn't need a banner about itself). The host prefixes the
-// app's name as the notification title, so `title` here is the actual message.
-var notifyAsked = false;
-var notifyGranted = false;
-async function ensureNotifyPermission() {
-  if (notifyAsked) return;
-  notifyAsked = true;
-  try {
-    if (window.Usion && Usion.permissions && Usion.permissions.request) {
-      var res = await Usion.permissions.request(["notifications"]);
-      notifyGranted = !!(res && (res.granted === true || (res.permissions && res.permissions.notifications)));
-    }
-  } catch (_) {}
-}
-
-function notifySelf(title, body) {
-  try {
-    if (notifyGranted && window.Usion && Usion.notify && document.hidden) {
-      var p = Usion.notify.send({ title: title, body: body });
-      if (p && p.catch) p.catch(function () {});
-    }
-  } catch (_) {}
-}
-
 // Record MY outcome exactly once per online match (idempotent across the
 // shooter/receiver/forfeit end paths, which can all reach onMatchEnd).
 function recordOutcome(iWon) {
@@ -2273,27 +2226,14 @@ function recordOutcome(iWon) {
   myStats.games += 1;
   if (iWon) {
     myStats.wins += 1;
-    notifySelf(t("nWonTitle"), t("nWonBody"));
   } else {
     myStats.losses += 1;
-    notifySelf(t("nLostTitle"), t("nLostBody"));
   }
   persistStats();
   submitLeaderboard();
   try { if (window.Usion && Usion.cloud && Usion.cloud.shared) Usion.cloud.shared.incr("games_total", 1); } catch (_) {}
   // Match result is delivered as a card in the two players' DM (see
   // reportMatchToGameCenter -> Usion.game.reportResult); no saveResult channel.
-}
-
-// Nudge a hidden player when it becomes their turn (once per turn).
-function maybeNotifyTurn() {
-  if (botMode || gamePhase !== "playing" || !myPlayer) { lastTurnNotified = false; return; }
-  var myTurn = currentTurn === myPlayer;
-  if (myTurn && document.hidden && !lastTurnNotified) {
-    lastTurnNotified = true;
-    notifySelf(t("nTurnTitle"), t("nTurnBody"));
-  }
-  if (!myTurn) lastTurnNotified = false;
 }
 
 // ── Checkpoint (durable reconnect state) ─────────────────

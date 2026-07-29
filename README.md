@@ -10,8 +10,8 @@ Three files, no build step: [index.html](index.html) · [script.js](script.js) �
 > Товч монголоор: энэ бол Usion платформ дээрх ширээний хөл бөмбөгийн бүрэн эх
 > код. Детерминист физиктэй тоглоомд Usion SDK-ийн multiplayer гэрээг
 > (authoritative-shooter загвар, per-sender snapshot versioning, checkpoint
-> reconnect, forfeit grace, solo→host promotion, i18n, permission-gated
-> notifications) хэрхэн зөв хэрэгжүүлэхийг харуулах нээлттэй жишээ.
+> reconnect, forfeit grace, solo→host promotion, i18n) хэрхэн зөв
+> хэрэгжүүлэхийг харуулах нээлттэй жишээ.
 
 ## Game rules (short)
 
@@ -100,9 +100,6 @@ down and opens the waiting overlay).
 - `Usion.cloud` — cross-device win/loss stats (localStorage fallback), plus a
   shared `games_total` counter via atomic `shared.incr`.
 - `Usion.leaderboard.submit` — cumulative wins.
-- `Usion.permissions.request(['notifications'])` **once** at online match
-  start, then `Usion.notify.send` for your-turn / match-end / opponent-left —
-  only while the app is hidden.
 - `Usion.saveResult` + `Usion.share` on the winner screen.
 - i18n: every UI string lives in the `STR` table (mn/en), chosen via
   `Usion.getLanguage()` (navigator fallback outside the host). Theme via
