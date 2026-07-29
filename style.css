@@ -3,7 +3,9 @@
 body {
   min-height: 100vh;
   min-height: 100dvh;
-  background: #2d5a1e;
+  background:
+    radial-gradient(circle at 50% 42%, rgba(79,155,55,0.42), rgba(5,18,8,0.86) 72%),
+    url("assets/grass-turf.webp") center / 420px 420px repeat;
   font-family: system-ui, sans-serif;
   display: flex;
   align-items: center;
@@ -26,6 +28,7 @@ body {
   align-items: center;
   padding: 8px;
   overflow: hidden;
+  filter: drop-shadow(0 18px 30px rgba(0,0,0,0.28));
 }
 
 /* Top Bar */
@@ -35,7 +38,9 @@ body {
   align-items: center;
   justify-content: space-between;
   padding: 6px 10px;
-  background: rgba(0,0,0,0.5);
+  background: linear-gradient(180deg, rgba(8,18,12,0.9), rgba(13,38,18,0.78));
+  border: 1px solid rgba(217,255,208,0.15);
+  box-shadow: inset 0 1px rgba(255,255,255,0.08), 0 5px 16px rgba(0,0,0,0.34);
   border-radius: 14px;
   margin-bottom: 6px;
 }
@@ -75,7 +80,9 @@ body {
 .turn-indicator {
   width: 100%;
   text-align: center;
-  background: rgba(0,0,0,0.4);
+  background: linear-gradient(90deg, rgba(7,25,11,0.78), rgba(24,72,28,0.78), rgba(7,25,11,0.78));
+  border: 1px solid rgba(226,255,220,0.12);
+  box-shadow: inset 0 1px rgba(255,255,255,0.06);
   padding: 5px 10px;
   border-radius: 10px;
   margin-bottom: 6px;
@@ -92,35 +99,14 @@ body {
   width: 100%;
   max-width: 400px;
   border-radius: 8px;
-  background: #3a8c28;
+  background: #17491b;
   touch-action: none;
+  border: 1px solid rgba(222,246,220,0.24);
+  box-shadow:
+    0 0 0 3px rgba(3,17,7,0.52),
+    0 12px 28px rgba(0,0,0,0.46),
+    inset 0 0 24px rgba(0,0,0,0.3);
 }
-
-/* Controls */
-.controls {
-  margin-top: 8px;
-  display: flex;
-  gap: 10px;
-  justify-content: center;
-  flex-wrap: wrap;
-  width: 100%;
-}
-
-button#resetBtn {
-  background: linear-gradient(135deg, #ff2e6e, #ff6b2e);
-  border: none;
-  color: white;
-  padding: 8px 20px;
-  border-radius: 12px;
-  cursor: pointer;
-  font-size: 13px;
-  font-weight: 700;
-  text-transform: uppercase;
-  box-shadow: 0 4px 12px rgba(255,46,110,0.4);
-  transition: transform 0.15s;
-}
-button#resetBtn:hover { transform: translateY(-2px); }
-button#resetBtn:active { transform: translateY(0); }
 
 /* Overlays */
 .overlay {
@@ -345,8 +331,6 @@ button#resetBtn:active { transform: translateY(0); }
   .player-info img { width: 28px; height: 28px; }
   .score { font-size: 18px; }
   .turn-indicator { padding: 3px 8px; margin-bottom: 4px; font-size: 11px; }
-  .controls { margin-top: 4px; }
-  button#resetBtn { padding: 6px 14px; font-size: 11px; }
 }
 
 @media (max-width: 360px) {

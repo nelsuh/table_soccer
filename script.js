@@ -297,7 +297,6 @@ let botTimer = null;
 const turnIndicator = document.getElementById("turnIndicator");
 const score1El = document.getElementById("score1");
 const score2El = document.getElementById("score2");
-const resetBtn = document.getElementById("resetBtn");
 const waitingOverlay = document.getElementById("waitingOverlay");
 const tacticOverlay = document.getElementById("tacticOverlay");
 const tacticConfirm = document.getElementById("tacticConfirm");
@@ -339,7 +338,6 @@ function applyLang(lang) {
   set("foulText", "foul");
   set("foulSub", "foulSub");
   set("winnerLabel", "winnerLabel");
-  set("resetBtn", "restart");
   set("winnerPlayAgain", "rematch");
   set("winnerShare", "share");
 }
@@ -366,6 +364,9 @@ var P1_HUE = 0, P2_HUE = 215; // matches the red/blue disk teams
 // ── Canvas Setup ─────────────────────────────────────────
 canvas = document.getElementById("field");
 ctx = canvas.getContext("2d");
+const grassTexture = new Image();
+grassTexture.onload = function () { render(); };
+grassTexture.src = "assets/grass-turf.webp";
 
 function resizeCanvas() {
   const container = canvas.parentElement;
@@ -380,13 +381,11 @@ function resizeCanvas() {
                         window.innerWidth <= 600;
   const touchInset = compactScreen ? 8 : 0;
   const maxW = Math.min(Math.max(contentW - touchInset * 2, 1), 400);
-  // Calculate available height: viewport minus topbar, turn indicator, controls, and padding
+  // Calculate available height: viewport minus the UI above the field and padding
   var topbar = document.querySelector(".topbar");
   var turnInd = document.getElementById("turnIndicator");
-  var controls = document.querySelector(".controls");
   var usedHeight = (topbar ? topbar.offsetHeight : 0) +
-                   (turnInd ? turnInd.offsetHeight : 0) +
-                   (controls ? controls.offsetHeight : 0) + 40; // 40px for margins/padding
+                   (turnInd ? turnInd.offsetHeight : 0) + 40; // 40px for margins/padding
   var viewportH = window.visualViewport ? window.visualViewport.height : window.innerHeight;
   var availH = viewportH - usedHeight - touchInset * 2;
 
@@ -815,11 +814,6 @@ function startBotMatchNow() {
 }
 
 
-// ── Controls ─────────────────────────────────────────────
-resetBtn.addEventListener("click", function () {
-  requestRematch();
-});
-
 // ── Tactic Selection ─────────────────────────────────────
 function showTacticSelection() {
   gamePhase = "tactics";
@@ -1058,17 +1052,114 @@ function drawField() {
   var sx = SIDE_PAD, ey = END_PAD;   // x inset (sides) / y inset (ends)
   var w = fieldW, h = fieldH;
 
-  // Green field with stripe pattern
-  for (var i = 0; i < 12; i++) {
-    ctx.fillStyle = i % 2 === 0 ? "#3a8c28" : "#359025";
-    ctx.fillRect(0, i * h / 12, w, h / 12);
+  // Dark outer turf gives the field the depth of a pitch inside a stadium.
+  ctx.fillStyle = "#143d18";
+  ctx.fillRect(0, 0, w, h);
+  if (grassTexture.complete && grassTexture.naturalWidth) {
+    var grassPattern = ctx.createPattern(grassTexture, "repeat");
+    if (grassPattern) {
+      ctx.globalAlpha = 0.42;
+      ctx.fillStyle = grassPattern;
+      ctx.fillRect(0, 0, w, h);
+      ctx.globalAlpha = 1;
+    }
   }
 
-  ctx.strokeStyle = "rgba(255,255,255,0.7)";
-  ctx.fillStyle = "rgba(255,255,255,0.7)";
-  ctx.lineWidth = 2;
+  // The playable surface: textured turf, alternating mowing directions and a
+  // soft central floodlight. This is visual only; field geometry is unchanged.
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(sx, ey, w - sx * 2, h - ey * 2);
+  ctx.clip();
 
-  // Outer boundary (square corners, matching the sketch)
+  ctx.fillStyle = "#3d9b2d";
+  ctx.fillRect(sx, ey, w - sx * 2, h - ey * 2);
+  if (grassTexture.complete && grassTexture.naturalWidth && grassPattern) {
+    ctx.globalAlpha = 0.7;
+    ctx.fillStyle = grassPattern;
+    ctx.fillRect(sx, ey, w - sx * 2, h - ey * 2);
+    ctx.globalAlpha = 1;
+  }
+
+  var stripeH = (h - ey * 2) / 12;
+  for (var i = 0; i < 12; i++) {
+    ctx.fillStyle = i % 2 === 0 ? "rgba(147,255,83,0.10)" : "rgba(0,45,8,0.10)";
+    ctx.fillRect(sx, ey + i * stripeH, w - sx * 2, stripeH);
+  }
+
+  var fieldLight = ctx.createRadialGradient(w / 2, h / 2, 20, w / 2, h / 2, h * 0.62);
+  fieldLight.addColorStop(0, "rgba(210,255,170,0.14)");
+  fieldLight.addColorStop(0.72, "rgba(30,95,22,0.02)");
+  fieldLight.addColorStop(1, "rgba(0,28,5,0.22)");
+  ctx.fillStyle = fieldLight;
+  ctx.fillRect(sx, ey, w - sx * 2, h - ey * 2);
+  ctx.restore();
+
+  // Compact side stands with deterministic crowd colors. They provide the
+  // stadium vibe without taking any space away from gameplay.
+  function drawStand(x, standW, mirror) {
+    var top = ey + 28, standH = h - (ey + 28) * 2;
+    var standGrad = ctx.createLinearGradient(x, 0, x + standW, 0);
+    if (mirror) {
+      standGrad.addColorStop(0, "#d8dde2");
+      standGrad.addColorStop(0.25, "#4c545c");
+      standGrad.addColorStop(1, "#181d20");
+    } else {
+      standGrad.addColorStop(0, "#181d20");
+      standGrad.addColorStop(0.75, "#4c545c");
+      standGrad.addColorStop(1, "#d8dde2");
+    }
+    ctx.fillStyle = "rgba(0,0,0,0.35)";
+    ctx.fillRect(x + (mirror ? -2 : 2), top + 4, standW, standH);
+    ctx.fillStyle = standGrad;
+    ctx.fillRect(x, top, standW, standH);
+
+    var crowd = ["#ffcc32", "#ef476f", "#31a8ff", "#f6f7f8", "#8be04e", "#ff7b35"];
+    for (var row = 0; row < 29; row++) {
+      for (var col = 0; col < 2; col++) {
+        var cy = top + 7 + row * (standH - 14) / 28;
+        var cx = x + 3.5 + col * Math.max(standW - 7, 2);
+        ctx.beginPath();
+        ctx.arc(cx, cy, 1.15, 0, Math.PI * 2);
+        ctx.fillStyle = crowd[(row * 3 + col * 5 + (mirror ? 2 : 0)) % crowd.length];
+        ctx.fill();
+      }
+    }
+
+    ctx.strokeStyle = "rgba(235,245,250,0.68)";
+    ctx.lineWidth = 1;
+    ctx.strokeRect(x + 0.5, top + 0.5, standW - 1, standH - 1);
+    for (var rail = top + 42; rail < top + standH; rail += 54) {
+      ctx.beginPath();
+      ctx.moveTo(x, rail);
+      ctx.lineTo(x + standW, rail);
+      ctx.stroke();
+    }
+  }
+  drawStand(2, 10, false);
+  drawStand(w - 12, 10, true);
+
+  // Raised metallic touchlines and their cast shadows make the pitch feel
+  // seated in an arena, while the true collision line remains at SIDE_PAD.
+  ctx.fillStyle = "rgba(0,0,0,0.30)";
+  ctx.fillRect(sx + 2, ey + 3, 4, h - ey * 2);
+  ctx.fillRect(w - sx - 2, ey + 3, 4, h - ey * 2);
+  var railGrad = ctx.createLinearGradient(sx - 2, 0, sx + 2, 0);
+  railGrad.addColorStop(0, "#6f7882");
+  railGrad.addColorStop(0.45, "#f4f6f8");
+  railGrad.addColorStop(1, "#727b84");
+  ctx.fillStyle = railGrad;
+  ctx.fillRect(sx - 2, ey, 4, h - ey * 2);
+  ctx.fillRect(w - sx - 2, ey, 4, h - ey * 2);
+
+  ctx.shadowColor = "rgba(0,0,0,0.35)";
+  ctx.shadowBlur = 2;
+  ctx.shadowOffsetY = 1;
+  ctx.strokeStyle = "rgba(250,255,246,0.94)";
+  ctx.fillStyle = "rgba(250,255,246,0.94)";
+  ctx.lineWidth = 2.3;
+
+  // Regulation pitch markings.
   ctx.strokeRect(sx, ey, w - sx * 2, h - ey * 2);
 
   // Center line
@@ -1107,6 +1198,36 @@ function drawField() {
   ctx.beginPath();
   ctx.arc(w / 2, h - ey - penH, arcR, Math.PI, Math.PI * 2);
   ctx.stroke();
+
+  ctx.shadowColor = "transparent";
+
+  // Corner flags tucked into the arena surround.
+  function cornerFlag(x, y, dirX, dirY, color) {
+    ctx.strokeStyle = "#e8edf0";
+    ctx.lineWidth = 1.4;
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.lineTo(x, y + dirY * 15);
+    ctx.stroke();
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.moveTo(x, y + dirY * 15);
+    ctx.lineTo(x + dirX * 8, y + dirY * 11);
+    ctx.lineTo(x, y + dirY * 7);
+    ctx.closePath();
+    ctx.fill();
+  }
+  cornerFlag(sx, ey, 1, -1, "#ff4d4d");
+  cornerFlag(w - sx, ey, -1, -1, "#ff4d4d");
+  cornerFlag(sx, h - ey, 1, 1, "#23a8ff");
+  cornerFlag(w - sx, h - ey, -1, 1, "#23a8ff");
+
+  // Subtle broadcast-style vignette binds the stadium layers together.
+  var vignette = ctx.createRadialGradient(w / 2, h / 2, h * 0.28, w / 2, h / 2, h * 0.72);
+  vignette.addColorStop(0, "rgba(0,0,0,0)");
+  vignette.addColorStop(1, "rgba(0,12,3,0.34)");
+  ctx.fillStyle = vignette;
+  ctx.fillRect(0, 0, w, h);
 }
 
 function drawGoals() {
@@ -1118,13 +1239,22 @@ function drawGoals() {
   // One goal net. lineY = the goal line (end line); backY = back of the net
   // (toward the edge of the canvas, outside the pitch).
   function net(lineY, backY) {
+    ctx.save();
+    ctx.shadowColor = "rgba(0,0,0,0.55)";
+    ctx.shadowBlur = 5;
+    ctx.shadowOffsetY = lineY < fieldH / 2 ? 2 : -2;
+
     // Net backing
-    ctx.fillStyle = "rgba(255,255,255,0.12)";
+    var netShade = ctx.createLinearGradient(0, lineY, 0, backY);
+    netShade.addColorStop(0, "rgba(244,250,255,0.24)");
+    netShade.addColorStop(1, "rgba(170,188,198,0.06)");
+    ctx.fillStyle = netShade;
     ctx.fillRect(gx, Math.min(lineY, backY), goalW, depth);
+    ctx.shadowColor = "transparent";
 
     // Mesh (fine grid)
-    ctx.strokeStyle = "rgba(255,255,255,0.35)";
-    ctx.lineWidth = 0.6;
+    ctx.strokeStyle = "rgba(240,247,250,0.58)";
+    ctx.lineWidth = 0.75;
     ctx.beginPath();
     for (var x = gx + 5; x < gx + goalW; x += 7) {        // verticals
       ctx.moveTo(x, lineY); ctx.lineTo(x, backY);
@@ -1135,14 +1265,18 @@ function drawGoals() {
     }
     ctx.stroke();
 
-    // Goal frame: posts + back bar (thick white)
-    ctx.strokeStyle = "#ffffff";
-    ctx.lineWidth = 3;
+    // Goal frame: bright metal posts with a darker under-stroke for depth.
+    ctx.strokeStyle = "rgba(36,45,52,0.72)";
+    ctx.lineWidth = 5;
     ctx.beginPath();
     ctx.moveTo(gx, lineY);          ctx.lineTo(gx, backY);            // left post
     ctx.moveTo(gx + goalW, lineY);  ctx.lineTo(gx + goalW, backY);    // right post
     ctx.moveTo(gx, backY);          ctx.lineTo(gx + goalW, backY);    // back bar
     ctx.stroke();
+    ctx.strokeStyle = "#f5f8fa";
+    ctx.lineWidth = 2.5;
+    ctx.stroke();
+    ctx.restore();
   }
 
   net(pad, pad - depth);                 // top goal (net above the pitch)
