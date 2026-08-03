@@ -53,6 +53,7 @@ const STR = {
     quickChat: "Түргэн чат",
     customChat: "Өөрийн мессеж",
     customChatPlaceholder: "Мессеж бичих…",
+    backToQuickChat: "Түргэн чат руу буцах",
     send: "Илгээх",
     shareText: (n, a, b) => n + " Ширээний хөл бөмбөгт " + a + "-" + b + " хожлоо! ⚽",
   },
@@ -93,6 +94,7 @@ const STR = {
     quickChat: "Quick chat",
     customChat: "Custom",
     customChatPlaceholder: "Type a message…",
+    backToQuickChat: "Back to quick chat",
     send: "Send",
     shareText: (n, a, b) => n + " won at Table Soccer! " + a + "-" + b + " ⚽",
   },
@@ -338,6 +340,7 @@ const chatToggle = document.getElementById("chatToggle");
 const chatPicker = document.getElementById("chatPicker");
 const chatPhrases = document.getElementById("chatPhrases");
 const customChatForm = document.getElementById("customChatForm");
+const customChatBack = document.getElementById("customChatBack");
 const customChatInput = document.getElementById("customChatInput");
 const customChatSend = document.getElementById("customChatSend");
 const reactionLayer = document.getElementById("reactionLayer");
@@ -377,6 +380,8 @@ function buildQuickChatPicker() {
 
 function setCustomChatOpen(open, focusInput) {
   customChatOpen = Boolean(open);
+  if (chatPicker) chatPicker.classList.toggle("custom-mode", customChatOpen);
+  if (chatToggle) chatToggle.classList.toggle("custom-mode", customChatOpen);
   if (customChatForm) customChatForm.hidden = !customChatOpen;
   const customButton = document.getElementById("customChatToggle");
   if (customButton) customButton.setAttribute("aria-expanded", String(customChatOpen));
@@ -386,7 +391,19 @@ function setCustomChatOpen(open, focusInput) {
   if (customChatOpen && focusInput && customChatInput) {
     try { customChatInput.focus({ preventScroll: true }); }
     catch (_) { customChatInput.focus(); }
+    updateChatKeyboardInset();
   }
+  if (!customChatOpen && chatPicker) chatPicker.style.setProperty("--chat-keyboard-inset", "0px");
+}
+
+// iOS and embedded webviews often keep fixed elements relative to the layout
+// viewport when the keyboard opens. Translate the compact composer by the
+// covered portion of that viewport so the input stays visible above the keys.
+function updateChatKeyboardInset() {
+  if (!chatPicker || !customChatOpen || !window.visualViewport) return;
+  const visualBottom = window.visualViewport.height + window.visualViewport.offsetTop;
+  const coveredHeight = Math.max(0, Math.min(window.innerHeight * 0.7, window.innerHeight - visualBottom));
+  chatPicker.style.setProperty("--chat-keyboard-inset", Math.round(coveredHeight) + "px");
 }
 
 function setChatPickerOpen(open) {
@@ -448,6 +465,7 @@ if (chatToggle) {
   });
 }
 if (chatPicker) chatPicker.addEventListener("click", function (event) { event.stopPropagation(); });
+if (customChatBack) customChatBack.addEventListener("click", function () { setCustomChatOpen(false, false); });
 if (customChatForm) {
   customChatForm.addEventListener("submit", function (event) {
     event.preventDefault();
@@ -487,6 +505,7 @@ function applyLang(lang) {
   set("chatPickerTitle", "quickChat");
   set("customChatToggle", "customChat");
   set("customChatSend", "send");
+  if (customChatBack) customChatBack.setAttribute("aria-label", t("backToQuickChat"));
   if (chatToggle) chatToggle.setAttribute("aria-label", t("quickChat"));
   if (customChatInput) {
     customChatInput.placeholder = t("customChatPlaceholder");
@@ -569,8 +588,17 @@ function resizeCanvas() {
   render();
 }
 resizeCanvas();
-window.addEventListener("resize", resizeCanvas);
-if (window.visualViewport) window.visualViewport.addEventListener("resize", resizeCanvas);
+window.addEventListener("resize", function () {
+  if (customChatOpen) updateChatKeyboardInset();
+  else resizeCanvas();
+});
+if (window.visualViewport) {
+  window.visualViewport.addEventListener("resize", function () {
+    if (customChatOpen) updateChatKeyboardInset();
+    else resizeCanvas();
+  });
+  window.visualViewport.addEventListener("scroll", updateChatKeyboardInset);
+}
 
 // ── Launch mode ──────────────────────────────────────────
 // Did the platform open us solo (GameTok / Explore) rather than from a real
