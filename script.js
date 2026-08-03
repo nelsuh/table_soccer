@@ -109,6 +109,16 @@ function detectLang() {
 
 // ── Constants ────────────────────────────────────────────
 const GOALS_TO_WIN = 3;
+const QUICK_CHAT_PHRASES = [
+  "юм авцаан",
+  "чи болчихжээ",
+  "би болчихжээ",
+  "хурдлаад өгөөрэй",
+  "муу юм бэ",
+  "амтагдахгүй юм байна дөө",
+  "EASY!",
+  "GG!",
+];
 const DISK_RADIUS = 18;
 const GOALKEEPER_RADIUS = 21;
 const GOALKEEPER_SPEED_MULTIPLIER = 0.85;
@@ -315,6 +325,88 @@ const player1Name = document.getElementById("player1Name");
 const player2Name = document.getElementById("player2Name");
 const player1Panel = document.getElementById("player1Panel");
 const player2Panel = document.getElementById("player2Panel");
+const chatToggle = document.getElementById("chatToggle");
+const chatPicker = document.getElementById("chatPicker");
+const chatPhrases = document.getElementById("chatPhrases");
+const reactionLayer = document.getElementById("reactionLayer");
+
+// Cosmetic realtime messages: never stored and never involved in match state.
+let chatOpen = false;
+let lastQuickChatAt = 0;
+
+function buildQuickChatPicker() {
+  if (!chatPhrases) return;
+  chatPhrases.innerHTML = "";
+  QUICK_CHAT_PHRASES.forEach(function (phrase) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "chat-phrase";
+    button.textContent = phrase;
+    button.addEventListener("click", function () { sendQuickChat(phrase); });
+    chatPhrases.appendChild(button);
+  });
+}
+
+function setChatPickerOpen(open) {
+  chatOpen = Boolean(open);
+  if (chatPicker) {
+    chatPicker.classList.toggle("show", chatOpen);
+    chatPicker.setAttribute("aria-hidden", String(!chatOpen));
+  }
+  if (chatToggle) chatToggle.setAttribute("aria-expanded", String(chatOpen));
+}
+
+function updateQuickChatVisibility() {
+  if (!chatToggle) return;
+  const show = players.length >= 2 && !waitingOverlay.classList.contains("show");
+  chatToggle.classList.toggle("show-btn", show);
+  if (!show && chatOpen) setChatPickerOpen(false);
+}
+
+function sendQuickChat(phrase) {
+  setChatPickerOpen(false);
+  if (!QUICK_CHAT_PHRASES.includes(phrase)) return;
+  const now = Date.now();
+  if (now - lastQuickChatAt < 700) return;
+  lastQuickChatAt = now;
+  showQuickChatBubble(myPlayer || 1, phrase);
+  if (!botMode && window.Usion && Usion.game && Usion.game.realtime) {
+    try { Usion.game.realtime("quick_chat", { phrase: phrase }); } catch (_) {}
+  }
+}
+
+function showQuickChatBubble(player, phrase) {
+  if (!reactionLayer || !QUICK_CHAT_PHRASES.includes(phrase)) return;
+  const anchor = player === 2 ? player2Panel : player1Panel;
+  if (!anchor) return;
+  const rect = anchor.getBoundingClientRect();
+  const bubble = document.createElement("div");
+  bubble.className = "reaction-bubble player-" + player;
+  bubble.textContent = phrase;
+  reactionLayer.appendChild(bubble);
+  const width = bubble.offsetWidth;
+  const height = bubble.offsetHeight;
+  const viewportWidth = window.innerWidth || document.documentElement.clientWidth;
+  const left = rect.left + rect.width / 2 - width / 2;
+  bubble.style.left = Math.max(8, Math.min(left, viewportWidth - width - 8)) + "px";
+  bubble.style.top = (rect.top > height + 14 ? rect.top - height - 8 : rect.bottom + 8) + "px";
+  requestAnimationFrame(function () { bubble.classList.add("pop"); });
+  setTimeout(function () { bubble.classList.add("out"); }, 1900);
+  setTimeout(function () { bubble.remove(); }, 2350);
+}
+
+if (chatToggle) {
+  chatToggle.addEventListener("click", function (event) {
+    event.stopPropagation();
+    setChatPickerOpen(!chatOpen);
+  });
+}
+if (chatPicker) chatPicker.addEventListener("click", function (event) { event.stopPropagation(); });
+document.addEventListener("click", function () { if (chatOpen) setChatPickerOpen(false); });
+document.addEventListener("keydown", function (event) {
+  if (event.key === "Escape" && chatOpen) setChatPickerOpen(false);
+});
+buildQuickChatPicker();
 
 // ── Language / theme / avatar helpers ────────────────────
 function applyLang(lang) {
@@ -696,6 +788,12 @@ function onSync(data) {
 function onRealtime(data) {
   // Any packet from a peer proves they're connected → cancel a pending forfeit.
   if (data.player_id && data.player_id !== myId && forfeitTimer) resumeFromGrace();
+  if (data.action_type === "quick_chat" && data.player_id !== myId) {
+    const phrase = data.action_data && data.action_data.phrase;
+    const player = players.indexOf(data.player_id) + 1;
+    if (player > 0 && QUICK_CHAT_PHRASES.includes(phrase)) showQuickChatBubble(player, phrase);
+    return;
+  }
   if (data.action_type === "request_state" && data.player_id !== myId) {
     // A peer rejoined and wants the live resting board. The host answers (both
     // clients agree on a settled state, so one responder is enough).
@@ -765,8 +863,15 @@ function setPlayerPanel(nameEl, avatarEl, id, seat, hue) {
 
 
 // ── Waiting Overlay ──────────────────────────────────────
-function showWaiting() { waitingForOpponent = true; waitingOverlay.classList.add("show"); }
-function hideWaiting() { waitingOverlay.classList.remove("show"); }
+function showWaiting() {
+  waitingForOpponent = true;
+  waitingOverlay.classList.add("show");
+  updateQuickChatVisibility();
+}
+function hideWaiting() {
+  waitingOverlay.classList.remove("show");
+  updateQuickChatVisibility();
+}
 
 // ── Play vs Bot ──────────────────────────────────────────
 var botDiffEl = document.getElementById("botDiff");
