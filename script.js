@@ -50,6 +50,10 @@ const STR = {
     connLost: "Холболт тасарлаа — түр зогслоо…",
     oppLeftGame: "Өрсөлдөгч тоглоомоос гарлаа",
     leftGrace: s => "Өрсөлдөгч гарлаа — дахин нэгдэхийг хүлээж байна… (" + s + "с)",
+    quickChat: "Түргэн чат",
+    customChat: "Өөрийн мессеж",
+    customChatPlaceholder: "Мессеж бичих…",
+    send: "Илгээх",
     shareText: (n, a, b) => n + " Ширээний хөл бөмбөгт " + a + "-" + b + " хожлоо! ⚽",
   },
   en: {
@@ -86,6 +90,10 @@ const STR = {
     connLost: "Connection lost — paused…",
     oppLeftGame: "Opponent left the game",
     leftGrace: s => "Opponent left — waiting to rejoin… (" + s + "s)",
+    quickChat: "Quick chat",
+    customChat: "Custom",
+    customChatPlaceholder: "Type a message…",
+    send: "Send",
     shareText: (n, a, b) => n + " won at Table Soccer! " + a + "-" + b + " ⚽",
   },
 };
@@ -119,6 +127,7 @@ const QUICK_CHAT_PHRASES = [
   "EASY!",
   "GG!",
 ];
+const MAX_CHAT_LENGTH = 80;
 const DISK_RADIUS = 18;
 const GOALKEEPER_RADIUS = 21;
 const GOALKEEPER_SPEED_MULTIPLIER = 0.85;
@@ -328,11 +337,21 @@ const player2Panel = document.getElementById("player2Panel");
 const chatToggle = document.getElementById("chatToggle");
 const chatPicker = document.getElementById("chatPicker");
 const chatPhrases = document.getElementById("chatPhrases");
+const customChatForm = document.getElementById("customChatForm");
+const customChatInput = document.getElementById("customChatInput");
+const customChatSend = document.getElementById("customChatSend");
 const reactionLayer = document.getElementById("reactionLayer");
 
 // Cosmetic realtime messages: never stored and never involved in match state.
 let chatOpen = false;
+let customChatOpen = false;
 let lastQuickChatAt = 0;
+
+function normalizeChatMessage(value) {
+  if (typeof value !== "string") return "";
+  const message = value.trim().replace(/\s+/g, " ");
+  return message && message.length <= MAX_CHAT_LENGTH ? message : "";
+}
 
 function buildQuickChatPicker() {
   if (!chatPhrases) return;
@@ -345,10 +364,34 @@ function buildQuickChatPicker() {
     button.addEventListener("click", function () { sendQuickChat(phrase); });
     chatPhrases.appendChild(button);
   });
+  const customButton = document.createElement("button");
+  customButton.type = "button";
+  customButton.id = "customChatToggle";
+  customButton.className = "chat-phrase chat-custom-toggle";
+  customButton.setAttribute("aria-controls", "customChatForm");
+  customButton.setAttribute("aria-expanded", String(customChatOpen));
+  customButton.textContent = t("customChat");
+  customButton.addEventListener("click", function () { setCustomChatOpen(true, true); });
+  chatPhrases.appendChild(customButton);
+}
+
+function setCustomChatOpen(open, focusInput) {
+  customChatOpen = Boolean(open);
+  if (customChatForm) customChatForm.hidden = !customChatOpen;
+  const customButton = document.getElementById("customChatToggle");
+  if (customButton) customButton.setAttribute("aria-expanded", String(customChatOpen));
+  if (!customChatOpen && customChatInput && document.activeElement === customChatInput) {
+    customChatInput.blur();
+  }
+  if (customChatOpen && focusInput && customChatInput) {
+    try { customChatInput.focus({ preventScroll: true }); }
+    catch (_) { customChatInput.focus(); }
+  }
 }
 
 function setChatPickerOpen(open) {
   chatOpen = Boolean(open);
+  if (!chatOpen) setCustomChatOpen(false, false);
   if (chatPicker) {
     chatPicker.classList.toggle("show", chatOpen);
     chatPicker.setAttribute("aria-hidden", String(!chatOpen));
@@ -363,20 +406,23 @@ function updateQuickChatVisibility() {
   if (!show && chatOpen) setChatPickerOpen(false);
 }
 
-function sendQuickChat(phrase) {
-  setChatPickerOpen(false);
-  if (!QUICK_CHAT_PHRASES.includes(phrase)) return;
+function sendQuickChat(value) {
+  const phrase = normalizeChatMessage(value);
+  if (!phrase) return false;
   const now = Date.now();
-  if (now - lastQuickChatAt < 700) return;
+  if (now - lastQuickChatAt < 700) return false;
   lastQuickChatAt = now;
+  setChatPickerOpen(false);
   showQuickChatBubble(myPlayer || 1, phrase);
   if (!botMode && window.Usion && Usion.game && Usion.game.realtime) {
     try { Usion.game.realtime("quick_chat", { phrase: phrase }); } catch (_) {}
   }
+  return true;
 }
 
-function showQuickChatBubble(player, phrase) {
-  if (!reactionLayer || !QUICK_CHAT_PHRASES.includes(phrase)) return;
+function showQuickChatBubble(player, value) {
+  const phrase = normalizeChatMessage(value);
+  if (!reactionLayer || !phrase) return;
   const anchor = player === 2 ? player2Panel : player1Panel;
   if (!anchor) return;
   const rect = anchor.getBoundingClientRect();
@@ -402,6 +448,12 @@ if (chatToggle) {
   });
 }
 if (chatPicker) chatPicker.addEventListener("click", function (event) { event.stopPropagation(); });
+if (customChatForm) {
+  customChatForm.addEventListener("submit", function (event) {
+    event.preventDefault();
+    if (customChatInput && sendQuickChat(customChatInput.value)) customChatInput.value = "";
+  });
+}
 document.addEventListener("click", function () { if (chatOpen) setChatPickerOpen(false); });
 document.addEventListener("keydown", function (event) {
   if (event.key === "Escape" && chatOpen) setChatPickerOpen(false);
@@ -432,6 +484,14 @@ function applyLang(lang) {
   set("winnerLabel", "winnerLabel");
   set("winnerPlayAgain", "rematch");
   set("winnerShare", "share");
+  set("chatPickerTitle", "quickChat");
+  set("customChatToggle", "customChat");
+  set("customChatSend", "send");
+  if (chatToggle) chatToggle.setAttribute("aria-label", t("quickChat"));
+  if (customChatInput) {
+    customChatInput.placeholder = t("customChatPlaceholder");
+    customChatInput.setAttribute("aria-label", t("customChatPlaceholder"));
+  }
 }
 
 // Respect the platform theme. The pitch itself is art-directed (green felt on
@@ -789,9 +849,9 @@ function onRealtime(data) {
   // Any packet from a peer proves they're connected → cancel a pending forfeit.
   if (data.player_id && data.player_id !== myId && forfeitTimer) resumeFromGrace();
   if (data.action_type === "quick_chat" && data.player_id !== myId) {
-    const phrase = data.action_data && data.action_data.phrase;
+    const phrase = normalizeChatMessage(data.action_data && data.action_data.phrase);
     const player = players.indexOf(data.player_id) + 1;
-    if (player > 0 && QUICK_CHAT_PHRASES.includes(phrase)) showQuickChatBubble(player, phrase);
+    if (player > 0 && phrase) showQuickChatBubble(player, phrase);
     return;
   }
   if (data.action_type === "request_state" && data.player_id !== myId) {

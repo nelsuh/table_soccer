@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
 <title>Table Soccer</title>
 <link rel="stylesheet" href="https://usions.com/usion-design-system.css">
-<link rel="stylesheet" href="style.css?v=6">
+<link rel="stylesheet" href="style.css?v=7">
 </head>
 
 <body>
@@ -44,8 +44,14 @@
 <button id="chatToggle" class="chat-toggle" type="button"
   aria-label="Түргэн чат" aria-expanded="false" aria-controls="chatPicker">💬</button>
 <div id="chatPicker" class="chat-picker" aria-hidden="true">
-  <div class="chat-picker-title">Түргэн чат</div>
+  <div class="chat-picker-title" id="chatPickerTitle">Түргэн чат</div>
   <div class="chat-phrases" id="chatPhrases"></div>
+  <form id="customChatForm" class="custom-chat-form" hidden>
+    <input id="customChatInput" class="custom-chat-input" type="text" maxlength="80"
+      autocomplete="off" enterkeyhint="send" aria-label="Custom message"
+      placeholder="Type a message…">
+    <button id="customChatSend" class="custom-chat-send" type="submit">Send</button>
+  </form>
 </div>
 <div id="reactionLayer" class="reaction-layer" aria-live="polite"></div>
 
@@ -148,7 +154,7 @@
 <!-- The Usion platform injects the SDK for hosted bundles; the explicit tag
      keeps the game working self-hosted / in the devkit too. -->
 <script src="https://usions.com/usion-sdk.js"></script>
-<script src="script.js?v=26"></script>
+<script src="script.js?v=27"></script>
 
 </body>
 </html>
