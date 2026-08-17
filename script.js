@@ -57,7 +57,7 @@ const STR = {
     send: "Илгээх",
     countryStep: "2 / 2 АЛХАМ",
     chooseCountry: "УЛСАА СОНГО",
-    worldCupTeams: "FIFA 2026 ДАШТ-ий 48 баг",
+    worldCupTeams: "FIFA 2026 ДАШТ-ий 48 баг + Монгол",
     searchCountry: "Улс хайх…",
     confirmCountry: "УЛСАА БАТЛАХ",
     shareText: (n, a, b) => n + " Ширээний хөл бөмбөгт " + a + "-" + b + " хожлоо! ⚽",
@@ -103,7 +103,7 @@ const STR = {
     send: "Send",
     countryStep: "STEP 2 OF 2",
     chooseCountry: "CHOOSE YOUR COUNTRY",
-    worldCupTeams: "48 FIFA World Cup 2026 teams",
+    worldCupTeams: "48 FIFA World Cup 2026 teams + Mongolia",
     searchCountry: "Search country…",
     confirmCountry: "CONFIRM COUNTRY",
     shareText: (n, a, b) => n + " won at Table Soccer! " + a + "-" + b + " ⚽",
@@ -205,7 +205,9 @@ const WORLD_CUP_COUNTRIES = [
   { code: "es", name: "Spain" },
   { code: "se", name: "Sweden" },
   { code: "ch", name: "Switzerland" },
-  { code: "tr", name: "Türkiye" }
+  { code: "tr", name: "Türkiye" },
+  // Mongolia is a special local option alongside the tournament roster.
+  { code: "mn", name: "Mongolia" }
 ];
 const COUNTRY_CODES = WORLD_CUP_COUNTRIES.map(function (country) { return country.code; });
 const COUNTRY_STORAGE_KEY = "table_soccer:country";

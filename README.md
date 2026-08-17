@@ -21,9 +21,10 @@ Three files, no build step: [index.html](index.html) Â· [script.js](script.js) Â
   the **first shot of a round is a foul** (the other player restarts).
 - Before each match both players pick an attacking and a defensive formation
   (1-3-2, 1-2-3, 1-4-1, 1-2-1-2) on a 10-second timer.
-- In online matches, each player chooses one of the 48 FIFA World Cup 2026
-  countries after confirming formations. Its flag becomes that player's disk
-  skin and is carried through multiplayer actions and reconnect snapshots.
+- In online matches, each player chooses from the 48 FIFA World Cup 2026
+  countries plus Mongolia as a special local option after confirming
+  formations. Its flag becomes that player's disk skin and is carried through
+  multiplayer actions and reconnect snapshots.
 
 | | | |
 |---|---|---|
