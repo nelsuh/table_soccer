@@ -55,6 +55,11 @@ const STR = {
     customChatPlaceholder: "Мессеж бичих…",
     backToQuickChat: "Түргэн чат руу буцах",
     send: "Илгээх",
+    countryStep: "2 / 2 АЛХАМ",
+    chooseCountry: "УЛСАА СОНГО",
+    worldCupTeams: "FIFA 2026 ДАШТ-ий 48 баг",
+    searchCountry: "Улс хайх…",
+    confirmCountry: "УЛСАА БАТЛАХ",
     shareText: (n, a, b) => n + " Ширээний хөл бөмбөгт " + a + "-" + b + " хожлоо! ⚽",
   },
   en: {
@@ -96,6 +101,11 @@ const STR = {
     customChatPlaceholder: "Type a message…",
     backToQuickChat: "Back to quick chat",
     send: "Send",
+    countryStep: "STEP 2 OF 2",
+    chooseCountry: "CHOOSE YOUR COUNTRY",
+    worldCupTeams: "48 FIFA World Cup 2026 teams",
+    searchCountry: "Search country…",
+    confirmCountry: "CONFIRM COUNTRY",
     shareText: (n, a, b) => n + " won at Table Soccer! " + a + "-" + b + " ⚽",
   },
 };
@@ -147,6 +157,60 @@ const DISK_BOUNCE = 0.85;
 const BALL_BOUNCE = 0.9;
 const FIXED_TIMESTEP_MS = 1000 / 60;
 const SHOT_START_DELAY_MS = 120;
+const WORLD_CUP_COUNTRIES = [
+  { code: "ca", name: "Canada" },
+  { code: "mx", name: "Mexico" },
+  { code: "us", name: "USA" },
+  { code: "au", name: "Australia" },
+  { code: "iq", name: "Iraq" },
+  { code: "ir", name: "IR Iran" },
+  { code: "jp", name: "Japan" },
+  { code: "jo", name: "Jordan" },
+  { code: "kr", name: "Korea Republic" },
+  { code: "qa", name: "Qatar" },
+  { code: "sa", name: "Saudi Arabia" },
+  { code: "uz", name: "Uzbekistan" },
+  { code: "dz", name: "Algeria" },
+  { code: "cv", name: "Cabo Verde" },
+  { code: "cd", name: "Congo DR" },
+  { code: "ci", name: "Côte d'Ivoire" },
+  { code: "eg", name: "Egypt" },
+  { code: "gh", name: "Ghana" },
+  { code: "ma", name: "Morocco" },
+  { code: "sn", name: "Senegal" },
+  { code: "za", name: "South Africa" },
+  { code: "tn", name: "Tunisia" },
+  { code: "cw", name: "Curaçao" },
+  { code: "ht", name: "Haiti" },
+  { code: "pa", name: "Panama" },
+  { code: "ar", name: "Argentina" },
+  { code: "br", name: "Brazil" },
+  { code: "co", name: "Colombia" },
+  { code: "ec", name: "Ecuador" },
+  { code: "py", name: "Paraguay" },
+  { code: "uy", name: "Uruguay" },
+  { code: "nz", name: "New Zealand" },
+  { code: "at", name: "Austria" },
+  { code: "be", name: "Belgium" },
+  { code: "ba", name: "Bosnia and Herzegovina" },
+  { code: "hr", name: "Croatia" },
+  { code: "cz", name: "Czechia" },
+  { code: "gb-eng", name: "England" },
+  { code: "fr", name: "France" },
+  { code: "de", name: "Germany" },
+  { code: "nl", name: "Netherlands" },
+  { code: "no", name: "Norway" },
+  { code: "pt", name: "Portugal" },
+  { code: "gb-sct", name: "Scotland" },
+  { code: "es", name: "Spain" },
+  { code: "se", name: "Sweden" },
+  { code: "ch", name: "Switzerland" },
+  { code: "tr", name: "Türkiye" }
+];
+const COUNTRY_CODES = WORLD_CUP_COUNTRIES.map(function (country) { return country.code; });
+const COUNTRY_STORAGE_KEY = "table_soccer:country";
+const DEFAULT_COUNTRY_CODE = "ca";
+const COUNTRY_FLAG_IMAGES = {};
 
 // Fixed logical field size. ALL physics, positions and collisions use these
 // units on every device, so the two clients simulate identically regardless
@@ -251,7 +315,7 @@ let ball = null;    // {x,y,vx,vy,radius}
 
 let score = [0, 0]; // [player1, player2]
 let currentTurn = 1; // 1 or 2
-let gamePhase = "waiting"; // waiting | tactics | playing | animating | goal | ended
+let gamePhase = "waiting"; // waiting | tactics | country | playing | animating | goal | ended
 let matchStarted = false;  // true once initMatch ran for the current match — the
                            // re-entry guard for tryStartMatch (decoupled from
                            // gamePhase, which incoming snapshots can mutate).
@@ -274,6 +338,8 @@ let tacticTimerInterval = null;
 let tacticTimeLeft = 10;
 let myTacticsConfirmed = false;
 let opponentTacticsReceived = false;
+let myCountryConfirmed = false;
+let opponentCountryReceived = false;
 
 // ── Multiplayer State ────────────────────────────────────
 let myId = null;
@@ -281,6 +347,8 @@ let myPlayer = 0;
 let players = [];
 let playerNames = {};
 let playerAvatars = {};
+let playerCountries = {};
+let selectedCountry = loadCountryChoice();
 let waitingForOpponent = false;
 let connectedCount = 0;
 let lastSequence = 0;
@@ -344,6 +412,97 @@ const customChatBack = document.getElementById("customChatBack");
 const customChatInput = document.getElementById("customChatInput");
 const customChatSend = document.getElementById("customChatSend");
 const reactionLayer = document.getElementById("reactionLayer");
+const countryOverlay = document.getElementById("countryOverlay");
+const countryGrid = document.getElementById("countryGrid");
+const countrySearch = document.getElementById("countrySearch");
+const countryConfirm = document.getElementById("countryConfirm");
+
+// ── World Cup country flag skins ─────────────────────────
+// Country flags are cosmetic only. They never change disk radius, collision,
+// mass or shot physics, preserving deterministic multiplayer simulation.
+function normalizeCountryCode(value) {
+  var code = String(value || "").toLowerCase();
+  return COUNTRY_CODES.includes(code) ? code : DEFAULT_COUNTRY_CODE;
+}
+
+function loadCountryChoice() {
+  try { return normalizeCountryCode(localStorage.getItem(COUNTRY_STORAGE_KEY)); }
+  catch (_) { return DEFAULT_COUNTRY_CODE; }
+}
+
+function saveCountryChoice(code) {
+  try { localStorage.setItem(COUNTRY_STORAGE_KEY, normalizeCountryCode(code)); } catch (_) {}
+}
+
+function getCountryForSeat(seat) {
+  var id = players[seat - 1];
+  return normalizeCountryCode(id && playerCountries[id]);
+}
+
+function buildCountryPicker() {
+  if (!countryGrid) return;
+  countryGrid.innerHTML = "";
+  WORLD_CUP_COUNTRIES.slice().sort(function (a, b) { return a.name.localeCompare(b.name); }).forEach(function (country) {
+    var button = document.createElement("button");
+    button.type = "button";
+    button.className = "country-option";
+    button.dataset.country = country.code;
+    button.dataset.search = country.name.toLowerCase();
+    button.setAttribute("aria-pressed", String(country.code === selectedCountry));
+
+    var flag = document.createElement("img");
+    flag.className = "country-flag";
+    flag.src = "assets/flags/" + country.code + ".svg";
+    flag.alt = "";
+    flag.setAttribute("aria-hidden", "true");
+    var label = document.createElement("span");
+    label.className = "country-name";
+    label.textContent = country.name;
+    button.appendChild(flag);
+    button.appendChild(label);
+    countryGrid.appendChild(button);
+  });
+  syncCountryPicker();
+}
+
+function syncCountryPicker() {
+  if (!countryGrid) return;
+  countryGrid.querySelectorAll(".country-option").forEach(function (button) {
+    var active = button.dataset.country === selectedCountry;
+    button.classList.toggle("selected", active);
+    button.setAttribute("aria-pressed", String(active));
+  });
+  var selected = countryGrid.querySelector(".country-option.selected");
+  if (selected && countryOverlay && countryOverlay.classList.contains("show")) {
+    try { selected.scrollIntoView({ block: "nearest" }); } catch (_) {}
+  }
+}
+
+function filterCountries(value) {
+  if (!countryGrid) return;
+  var query = String(value || "").trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  countryGrid.querySelectorAll(".country-option").forEach(function (button) {
+    var haystack = String(button.dataset.search || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    button.hidden = Boolean(query && haystack.indexOf(query) === -1);
+  });
+}
+
+function chooseBotCountry() {
+  var choices = COUNTRY_CODES.filter(function (code) { return code !== selectedCountry; });
+  return choices[Math.floor(Math.random() * choices.length)] || DEFAULT_COUNTRY_CODE;
+}
+
+if (countryGrid) {
+  countryGrid.addEventListener("click", function (event) {
+    var option = event.target.closest(".country-option");
+    if (!option || option.hidden || myCountryConfirmed) return;
+    selectedCountry = normalizeCountryCode(option.dataset.country);
+    syncCountryPicker();
+    if (countryConfirm) countryConfirm.disabled = false;
+  });
+}
+if (countrySearch) countrySearch.addEventListener("input", function () { filterCountries(countrySearch.value); });
+if (countryConfirm) countryConfirm.addEventListener("click", confirmCountry);
 
 // Cosmetic realtime messages: never stored and never involved in match state.
 let chatOpen = false;
@@ -477,6 +636,7 @@ document.addEventListener("keydown", function (event) {
   if (event.key === "Escape" && chatOpen) setChatPickerOpen(false);
 });
 buildQuickChatPicker();
+buildCountryPicker();
 
 // ── Language / theme / avatar helpers ────────────────────
 function applyLang(lang) {
@@ -505,12 +665,21 @@ function applyLang(lang) {
   set("chatPickerTitle", "quickChat");
   set("customChatToggle", "customChat");
   set("customChatSend", "send");
+  set("countryStep", "countryStep");
+  set("countryTitle", "chooseCountry");
+  set("countrySubtitle", "worldCupTeams");
+  set("countryConfirm", "confirmCountry");
   if (customChatBack) customChatBack.setAttribute("aria-label", t("backToQuickChat"));
   if (chatToggle) chatToggle.setAttribute("aria-label", t("quickChat"));
   if (customChatInput) {
     customChatInput.placeholder = t("customChatPlaceholder");
     customChatInput.setAttribute("aria-label", t("customChatPlaceholder"));
   }
+  if (countrySearch) {
+    countrySearch.placeholder = t("searchCountry");
+    countrySearch.setAttribute("aria-label", t("searchCountry"));
+  }
+  buildCountryPicker();
 }
 
 // Respect the platform theme. The pitch itself is art-directed (green felt on
@@ -538,6 +707,12 @@ ctx = canvas.getContext("2d");
 const grassTexture = new Image();
 grassTexture.onload = function () { render(); };
 grassTexture.src = "assets/grass-turf.webp";
+WORLD_CUP_COUNTRIES.forEach(function (country) {
+  var image = new Image();
+  image.onload = function () { render(); };
+  image.src = "assets/flags/" + country.code + ".svg";
+  COUNTRY_FLAG_IMAGES[country.code] = image;
+});
 
 function resizeCanvas() {
   const container = canvas.parentElement;
@@ -620,6 +795,10 @@ function launchedSolo(config) {
   } catch (_) { return false; }
 }
 
+function isPregamePhase() {
+  return gamePhase === "tactics" || gamePhase === "country";
+}
+
 // ── Usion Init ───────────────────────────────────────────
 Usion.init(async function (config) {
   applyLang(detectLang());   // the platform's language setting is known now
@@ -627,6 +806,7 @@ Usion.init(async function (config) {
   myId = config.userId;
   playerNames[myId] = config.userName || t("you");
   if (config.userAvatar) playerAvatars[myId] = config.userAvatar;
+  playerCountries[myId] = selectedCountry;
   // Canonical platform roster (playerIds[0] = host). Seed seating from it so
   // both clients agree on player 1 vs 2 (orientation + disk ownership) even if
   // the per-client join ack arrives in a different order.
@@ -715,9 +895,13 @@ function onRoomPromoted() {
   updateScoreDisplay();
   myTacticsConfirmed = false;
   opponentTacticsReceived = false;
+  myCountryConfirmed = false;
+  opponentCountryReceived = false;
   players = [myId];
   myPlayer = 0;
   tacticOverlay.classList.remove("show");
+  countryOverlay.classList.remove("show");
+  countryOverlay.setAttribute("aria-hidden", "true");
   goalOverlay.classList.remove("show");
   foulOverlay.classList.remove("show");
   winnerOverlay.classList.remove("show");
@@ -775,7 +959,7 @@ function onPlayerLeft(data) {
   if (data && data.player_ids && data.player_ids.length) players = data.player_ids;
   connectedCount = Math.max(0, connectedCount - 1);
   if (gamePhase === "ended") return;
-  if (gamePhase === "tactics" || waitingForOpponent) {
+  if (isPregamePhase() || waitingForOpponent) {
     updateTurnIndicator(t("oppLeftGame"));
     return;
   }
@@ -829,6 +1013,21 @@ function onAction(data) {
   if (data.sequence !== undefined) lastSequence = Math.max(lastSequence, data.sequence);
   if (data.player_id && data.player_id !== myId && forfeitTimer) resumeFromGrace();
 
+  if (data.action_type === "country" && data.player_id) {
+    var countryCode = normalizeCountryCode(data.action_data && data.action_data.country);
+    playerCountries[data.player_id] = countryCode;
+    if (data.player_id === myId) {
+      selectedCountry = countryCode;
+      saveCountryChoice(selectedCountry);
+      myCountryConfirmed = true;
+    } else {
+      opponentCountryReceived = true;
+    }
+    syncCountryPicker();
+    render();
+    tryStartMatch();
+  }
+
   if (data.action_type === "shot" && data.player_id !== myId) {
     applyShot(data.action_data);
   }
@@ -843,7 +1042,7 @@ function onAction(data) {
     // (requestRematch is a pure broadcast), so the accept is a STORED action:
     // it applies on the sequenced ECHO for sender and receiver alike —
     // exactly-once, and a rejoiner replaying the log lands in the same state.
-    if (gamePhase !== "tactics") resetForRematch(); // duplicate accepts collapse here
+    if (!isPregamePhase()) resetForRematch(); // duplicate accepts collapse here
   }
   // pendingShot is cleared in onShotComplete after physics settle
 }
@@ -864,13 +1063,37 @@ function onSync(data) {
   // late joiner / reconnect during selection still learns the opponent's pick.
   if (!data.actions || data.actions.length === 0) return;
   data.actions.forEach(function (a) {
-    if (a.action_type === "tactics" && a.player_id !== myId) {
-      opponentAttackTactic = a.action_data.attack || "1-3-2";
-      opponentDefenseTactic = a.action_data.defense || "1-3-2";
-      opponentTacticsReceived = true;
-      tryStartMatch();
+    if (a.action_type === "country" && a.player_id) {
+      var code = normalizeCountryCode(a.action_data && a.action_data.country);
+      playerCountries[a.player_id] = code;
+      if (a.player_id === myId) {
+        selectedCountry = code;
+        myCountryConfirmed = true;
+      } else {
+        opponentCountryReceived = true;
+      }
+    }
+    if (a.action_type === "tactics") {
+      if (a.player_id === myId) {
+        myAttackTactic = a.action_data.attack || "1-3-2";
+        myDefenseTactic = a.action_data.defense || "1-3-2";
+        myTacticsConfirmed = true;
+      } else {
+        opponentAttackTactic = a.action_data.attack || "1-3-2";
+        opponentDefenseTactic = a.action_data.defense || "1-3-2";
+        opponentTacticsReceived = true;
+      }
     }
   });
+  syncCountryPicker();
+  if (myTacticsConfirmed && gamePhase === "tactics") showCountrySelection();
+  if (myCountryConfirmed) {
+    if (countrySearch) countrySearch.disabled = true;
+    countryConfirm.textContent = t("waitingOppConfirm");
+    countryConfirm.disabled = true;
+  }
+  tryStartMatch();
+  render();
 }
 
 function onRealtime(data) {
@@ -885,13 +1108,14 @@ function onRealtime(data) {
   if (data.action_type === "request_state" && data.player_id !== myId) {
     // A peer rejoined and wants the live resting board. The host answers (both
     // clients agree on a settled state, so one responder is enough).
-    if (isHostPlayer() && gamePhase !== "tactics" && !waitingForOpponent) broadcastBoardSnapshot();
+    if (isHostPlayer() && !isPregamePhase() && !waitingForOpponent) broadcastBoardSnapshot();
     return;
   }
   if (data.action_type === "player_info" && data.player_id !== myId) {
     if (data.action_data.name) playerNames[data.player_id] = data.action_data.name;
     if (data.action_data.avatar) playerAvatars[data.player_id] = data.action_data.avatar;
     updatePlayerDisplay();
+    render();
     return;
   }
   if (data.action_type === "board_state" && data.player_id !== myId) {
@@ -903,6 +1127,13 @@ function onRealtime(data) {
     opponentDefenseTactic = data.action_data.defense || "1-3-2";
     opponentTacticsReceived = true;
     tryStartMatch();
+    return;
+  }
+  if (data.action_type === "country_selected" && data.player_id !== myId) {
+    playerCountries[data.player_id] = normalizeCountryCode(data.action_data && data.action_data.country);
+    opponentCountryReceived = true;
+    tryStartMatch();
+    render();
     return;
   }
   if (data.action_type === "rematch_state" && data.action_data) {
@@ -926,7 +1157,7 @@ function onRematchRequest(data) {
 // Platform mode never emits game:restarted (requestRematch is a pure
 // broadcast) — kept only for direct-mode hosts that do. The stored "rematch"
 // action in onAction is the real restart path.
-function onGameRestarted() { if (gamePhase !== "tactics") resetForRematch(); }
+function onGameRestarted() { if (!isPregamePhase()) resetForRematch(); }
 
 function startOnlineGame() {
   waitingForOpponent = false;
@@ -989,6 +1220,8 @@ function startBotGame() {
   if (!playerNames[myId]) playerNames[myId] = t("you");
   players = [myId, "BOT"];
   playerNames["BOT"] = t("botName", t(botDifficulty));
+  playerCountries[myId] = selectedCountry;
+  playerCountries["BOT"] = chooseBotCountry();
 
   updatePlayerDisplay();
   startBotMatchNow();
@@ -1005,6 +1238,10 @@ function startBotMatchNow() {
   opponentAttackTactic = keys[Math.floor(Math.random() * keys.length)];
   opponentDefenseTactic = keys[Math.floor(Math.random() * keys.length)];
   opponentTacticsReceived = true;
+  myCountryConfirmed = true;
+  opponentCountryReceived = true;
+  playerCountries[myId] = selectedCountry;
+  playerCountries["BOT"] = chooseBotCountry();
   tryStartMatch();
 }
 
@@ -1015,9 +1252,15 @@ function showTacticSelection() {
   matchStarted = false;          // a fresh match/rematch can be started again
   myTacticsConfirmed = false;
   opponentTacticsReceived = false;
+  myCountryConfirmed = false;
+  opponentCountryReceived = false;
   tacticConfirm.textContent = t("confirm");
   tacticConfirm.disabled = false;
   tacticOverlay.classList.add("show");
+  countryOverlay.classList.remove("show");
+  countryOverlay.setAttribute("aria-hidden", "true");
+  if (countrySearch) { countrySearch.value = ""; countrySearch.disabled = false; }
+  filterCountries("");
   goalOverlay.classList.remove("show");
   winnerOverlay.classList.remove("show");
   tacticTimeLeft = 10;
@@ -1101,34 +1344,78 @@ function confirmTactics() {
     opponentAttackTactic = keys[Math.floor(Math.random() * keys.length)];
     opponentDefenseTactic = keys[Math.floor(Math.random() * keys.length)];
     opponentTacticsReceived = true;
+    myCountryConfirmed = true;
+    opponentCountryReceived = true;
+    playerCountries[myId] = selectedCountry;
+    playerCountries["BOT"] = chooseBotCountry();
     tryStartMatch();
     return;
   }
 
   Usion.game.realtime("tactics_selected", { attack: myAttackTactic, defense: myDefenseTactic });
   Usion.game.action("tactics", { attack: myAttackTactic, defense: myDefenseTactic });
+  showCountrySelection();
+}
 
+function showCountrySelection() {
+  gamePhase = "country";
+  tacticOverlay.classList.remove("show");
+  countryOverlay.classList.add("show");
+  countryOverlay.setAttribute("aria-hidden", "false");
+  countryConfirm.textContent = t("confirmCountry");
+  countryConfirm.disabled = false;
+  if (countrySearch) {
+    countrySearch.value = "";
+    countrySearch.disabled = false;
+  }
+  filterCountries("");
+  syncCountryPicker();
+}
+
+function confirmCountry() {
+  if (myCountryConfirmed) return;
+  selectedCountry = normalizeCountryCode(selectedCountry);
+  playerCountries[myId] = selectedCountry;
+  saveCountryChoice(selectedCountry);
+  myCountryConfirmed = true;
+  if (countrySearch) countrySearch.disabled = true;
+  countryConfirm.textContent = t("waitingOppConfirm");
+  countryConfirm.disabled = true;
+
+  if (botMode) {
+    playerCountries["BOT"] = chooseBotCountry();
+    opponentCountryReceived = true;
+    tryStartMatch();
+    return;
+  }
+
+  Usion.game.realtime("country_selected", { country: selectedCountry });
+  Usion.game.action("country", { country: selectedCountry });
   tryStartMatch();
 }
 
 function tryStartMatch() {
-  if (!myTacticsConfirmed) return;
-  // Re-entry guard: confirmTactics sends BOTH a realtime "tactics_selected" and a
-  // durable "tactics" action, and each can land on the opponent and call us — so
-  // without this, initMatch() runs twice and re-zeroes a match already in progress.
+  if (!myTacticsConfirmed || !myCountryConfirmed) return;
+  // Re-entry guard: tactics and country both use realtime + durable actions, and
+  // either delivery path can call us. Start exactly once when both players have
+  // completed both pre-match steps.
   // Guard on matchStarted (set in initMatch, cleared in showTacticSelection), NOT
   // gamePhase: an incoming snapshot can mutate gamePhase out of "tactics" while we
   // are still on the formation screen, which used to block CONFIRM entirely.
   if (matchStarted) return;
-  if (!opponentTacticsReceived) {
-    // Show waiting state on the tactic overlay
-    tacticConfirm.textContent = t("waitingOppConfirm");
-    tacticConfirm.disabled = true;
+  if (!opponentTacticsReceived || !opponentCountryReceived) {
+    countryConfirm.textContent = t("waitingOppConfirm");
+    countryConfirm.disabled = true;
     return;
   }
   tacticOverlay.classList.remove("show");
+  countryOverlay.classList.remove("show");
+  countryOverlay.setAttribute("aria-hidden", "true");
   tacticConfirm.textContent = t("confirm");
   tacticConfirm.disabled = false;
+  countryConfirm.textContent = t("confirmCountry");
+  countryConfirm.disabled = false;
+  if (countrySearch) countrySearch.disabled = false;
   initMatch();
 }
 
@@ -1502,40 +1789,69 @@ function drawDisks() {
       ctx.restore();
     }
 
-    // Disk body
+    // Country-flag skin. It is render-only and never changes the disk object.
     ctx.save();
-    ctx.beginPath();
-    ctx.arc(d.x, d.y, d.radius, 0, Math.PI * 2);
-
-    if (d.player === 1) {
-      // Player 1 (top) - red/warm team
-      var g1 = ctx.createRadialGradient(d.x - 4, d.y - 4, 2, d.x, d.y, d.radius);
-      g1.addColorStop(0, "#ff6b6b");
-      g1.addColorStop(1, "#cc2222");
-      ctx.fillStyle = g1;
-    } else {
-      // Player 2 (bottom) - blue/cool team
-      var g2 = ctx.createRadialGradient(d.x - 4, d.y - 4, 2, d.x, d.y, d.radius);
-      g2.addColorStop(0, "#6bb5ff");
-      g2.addColorStop(1, "#2255cc");
-      ctx.fillStyle = g2;
-    }
-    ctx.fill();
-
-    // Disk border
-    ctx.strokeStyle = "rgba(255,255,255,0.5)";
-    ctx.lineWidth = 2;
-    ctx.stroke();
-
-    // Inner ring
-    ctx.beginPath();
-    ctx.arc(d.x, d.y, d.radius * 0.6, 0, Math.PI * 2);
-    ctx.strokeStyle = "rgba(255,255,255,0.3)";
-    ctx.lineWidth = 1;
-    ctx.stroke();
-
+    drawCountryFlagDisk(d, getCountryForSeat(d.player));
     ctx.restore();
   });
+}
+
+function drawCountryFlagDisk(d, countryCode) {
+  var warm = d.player === 1;
+  var bright = warm ? "#ff6b6b" : "#6bb5ff";
+  var base = warm ? "#cc2222" : "#2255cc";
+  var r = d.radius;
+  var flagImage = COUNTRY_FLAG_IMAGES[normalizeCountryCode(countryCode)];
+
+  // Cast shadow and a team-color fallback while the local SVG loads.
+  ctx.beginPath();
+  ctx.arc(d.x + 1.5, d.y + 2.5, r, 0, Math.PI * 2);
+  ctx.fillStyle = "rgba(0,0,0,0.35)";
+  ctx.fill();
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(d.x, d.y, r, 0, Math.PI * 2);
+  ctx.clip();
+
+  var gradient = ctx.createRadialGradient(d.x - r * 0.3, d.y - r * 0.3, 1, d.x, d.y, r);
+  gradient.addColorStop(0, bright);
+  gradient.addColorStop(1, base);
+  ctx.fillStyle = gradient;
+  ctx.fillRect(d.x - r, d.y - r, r * 2, r * 2);
+
+  if (flagImage && flagImage.complete && flagImage.naturalWidth) {
+    // Player 1's whole pitch view is flipped. Counter-flip the flag locally so
+    // crests and stripes stay upright on both players' screens.
+    if (myPlayer === 1) {
+      ctx.save();
+      ctx.translate(d.x, d.y);
+      ctx.scale(1, -1);
+      ctx.drawImage(flagImage, -r, -r, r * 2, r * 2);
+      ctx.restore();
+    } else {
+      ctx.drawImage(flagImage, d.x - r, d.y - r, r * 2, r * 2);
+    }
+  }
+
+  // A small gloss and team-color rim keep the pieces readable at phone scale.
+  var gloss = ctx.createRadialGradient(d.x - r * 0.35, d.y - r * 0.4, 0, d.x - r * 0.25, d.y - r * 0.3, r);
+  gloss.addColorStop(0, "rgba(255,255,255,0.32)");
+  gloss.addColorStop(0.42, "rgba(255,255,255,0.06)");
+  gloss.addColorStop(1, "rgba(255,255,255,0)");
+  ctx.fillStyle = gloss;
+  ctx.fillRect(d.x - r, d.y - r, r * 2, r * 2);
+  ctx.restore();
+
+  ctx.beginPath();
+  ctx.arc(d.x, d.y, r, 0, Math.PI * 2);
+  ctx.strokeStyle = bright;
+  ctx.lineWidth = 3;
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(d.x, d.y, r - 2, 0, Math.PI * 2);
+  ctx.strokeStyle = "rgba(255,255,255,0.62)";
+  ctx.lineWidth = 1;
+  ctx.stroke();
 }
 
 function drawBall() {
@@ -2502,6 +2818,7 @@ function getBoardSnapshot() {
     roundShotCount: roundShotCount,
     foulActive: foulActive,
     rematchState: rematchState,
+    countries: [getCountryForSeat(1), getCountryForSeat(2)],
     // Local monotonic counter (NOT Date.now) so versions are reliably increasing
     // and compared per-sender without cross-device clock skew.
     version: ++snapshotSeq
@@ -2598,7 +2915,7 @@ function isHostPlayer() {
 
 function writeCheckpoint() {
   if (botMode) return;                                          // no remote peer to recover
-  if (gamePhase === "tactics" || waitingForOpponent) return;   // nothing to resume yet
+  if (isPregamePhase() || waitingForOpponent) return;           // nothing to resume yet
   try {
     if (window.Usion && Usion.game && Usion.game.setState) {
       var snap = getBoardSnapshot();
@@ -2624,10 +2941,14 @@ function applyCheckpoint(state) {
   netPaused = false;
   hideWaiting();
   tacticOverlay.classList.remove("show");
+  countryOverlay.classList.remove("show");
+  countryOverlay.setAttribute("aria-hidden", "true");
   clearInterval(tacticTimerInterval);
   cancelBotMove();
   myTacticsConfirmed = true;
   opponentTacticsReceived = true;
+  myCountryConfirmed = true;
+  opponentCountryReceived = true;
   updatePlayerDisplay();
 
   // The checkpoint carries the full board (disks/ball/score/turn/phase) in the
@@ -2643,7 +2964,7 @@ function applyBoardSnapshot(snap, senderId) {
   // or first game). A late in-match snapshot would otherwise overwrite gamePhase
   // and yank us out of "tactics". Checkpoints (no senderId) still apply — they
   // legitimately promote a reconnecting client into the live match.
-  if (senderId && (gamePhase === "tactics" || waitingForOpponent)) return;
+  if (senderId && (isPregamePhase() || waitingForOpponent)) return;
   var v = Number(snap.version || 0);
   // Per-sender staleness gate: each sender's `version` is monotonic for itself, so
   // this drops only genuinely out-of-order packets from THAT player. The old
@@ -2692,6 +3013,17 @@ function applyBoardSnapshot(snap, senderId) {
   if (snap.roundStarter) roundStarter = snap.roundStarter;
   if (snap.roundShotCount !== undefined) roundShotCount = snap.roundShotCount;
   if (snap.rematchState) rematchState = snap.rematchState;
+  if (Array.isArray(snap.countries)) {
+    snap.countries.slice(0, 2).forEach(function (country, index) {
+      if (!players[index]) return;
+      var code = normalizeCountryCode(country);
+      playerCountries[players[index]] = code;
+      if (players[index] === myId) {
+        selectedCountry = code;
+        saveCountryChoice(code);
+      }
+    });
+  }
 
   // Show/hide foul overlay to match sender's state
   if (snap.foulActive && !foulActive) {

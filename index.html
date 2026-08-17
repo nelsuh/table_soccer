@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
 <title>Table Soccer</title>
 <link rel="stylesheet" href="https://usions.com/usion-design-system.css">
-<link rel="stylesheet" href="style.css?v=8">
+<link rel="stylesheet" href="style.css?v=10">
 </head>
 
 <body>
@@ -71,6 +71,22 @@
       </div>
       <button id="playBotBtn" class="btn-confirm">PLAY VS BOT</button>
     </div>
+  </div>
+</div>
+
+<!-- Country Selection Overlay (shown after formation selection) -->
+<div id="countryOverlay" class="overlay country-overlay" role="dialog" aria-modal="true"
+  aria-labelledby="countryTitle" aria-hidden="true">
+  <div class="country-card">
+    <div class="country-heading">
+      <div class="country-step" id="countryStep">STEP 2 OF 2</div>
+      <h2 class="country-title" id="countryTitle">CHOOSE YOUR COUNTRY</h2>
+      <p class="country-subtitle" id="countrySubtitle">FIFA World Cup 2026 teams</p>
+    </div>
+    <input id="countrySearch" class="country-search" type="search" autocomplete="off"
+      placeholder="Search country…" aria-label="Search country">
+    <div id="countryGrid" class="country-grid"></div>
+    <button class="btn-confirm country-confirm" id="countryConfirm">CONFIRM COUNTRY</button>
   </div>
 </div>
 
@@ -156,7 +172,7 @@
 <!-- The Usion platform injects the SDK for hosted bundles; the explicit tag
      keeps the game working self-hosted / in the devkit too. -->
 <script src="https://usions.com/usion-sdk.js"></script>
-<script src="script.js?v=28"></script>
+<script src="script.js?v=30"></script>
 
 </body>
 </html>
