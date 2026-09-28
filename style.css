@@ -1,5 +1,14 @@
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
+/* Usion GameTok runs edge to edge: the notch covers the top inset and the home
+   indicator the bottom one. The turf bleeds under them; the UI stays inside. */
+:root {
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+}
+
 body {
   min-height: 100vh;
   min-height: 100dvh;
@@ -24,7 +33,7 @@ body {
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding: 8px;
+  padding: calc(8px + var(--safe-top)) calc(8px + var(--safe-right)) calc(8px + var(--safe-bottom)) calc(8px + var(--safe-left));
   overflow: hidden;
   filter: drop-shadow(0 18px 30px rgba(0,0,0,0.28));
 }
@@ -116,6 +125,7 @@ body {
   justify-content: center;
   background: rgba(0,0,0,0.7);
   backdrop-filter: blur(4px);
+  padding: calc(8px + var(--safe-top)) calc(8px + var(--safe-right)) calc(8px + var(--safe-bottom)) calc(8px + var(--safe-left));
 }
 .overlay.show { display: flex; animation: fadeIn 0.3s ease; }
 
@@ -168,7 +178,7 @@ body {
   animation: popIn 0.4s cubic-bezier(0.34,1.56,0.64,1);
   max-width: 360px;
   width: 90vw;
-  max-height: 90vh;
+  max-height: min(90vh, 100%);
   overflow-y: auto;
 }
 .tactic-title {
@@ -185,7 +195,7 @@ body {
 }
 .tactic-grid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 8px;
   margin-bottom: 8px;
 }
@@ -194,6 +204,7 @@ body {
   flex-direction: column;
   align-items: center;
   gap: 4px;
+  min-width: 0;
   padding: 6px;
   border-radius: 10px;
   border: 2px solid transparent;
@@ -203,8 +214,12 @@ body {
 .tactic-option:hover { background: rgba(255,255,255,0.08); }
 .tactic-option.selected { border-color: #00e5ff; background: rgba(0,229,255,0.12); }
 .tactic-preview {
-  width: 70px;
-  height: 90px;
+  /* Shrinks with its column (the buffer is always drawn at 70x90): four fixed
+     70px previews overflowed the card at phone width. */
+  width: 100%;
+  max-width: 70px;
+  height: auto;
+  aspect-ratio: 7 / 9;
   border-radius: 6px;
   background: #3a8c28;
 }
@@ -344,8 +359,8 @@ body {
 
 /* Quick chat */
 .chat-toggle {
-  position: fixed; right: max(12px, env(safe-area-inset-right));
-  bottom: max(12px, env(safe-area-inset-bottom)); z-index: 70;
+  position: fixed; right: max(12px, var(--safe-right));
+  bottom: max(12px, var(--safe-bottom)); z-index: 70;
   width: 44px; height: 44px; padding: 0; border-radius: 50%;
   display: none; align-items: center; justify-content: center;
   border: 1.5px solid rgba(217,255,208,.45);
@@ -357,8 +372,8 @@ body {
 .chat-toggle:active { transform: scale(.92); }
 .chat-picker {
   --chat-keyboard-inset: 0px;
-  position: fixed; right: max(12px, env(safe-area-inset-right));
-  bottom: calc(max(12px, env(safe-area-inset-bottom)) + 56px + var(--chat-keyboard-inset)); z-index: 71;
+  position: fixed; right: max(12px, var(--safe-right));
+  bottom: calc(max(12px, var(--safe-bottom)) + 56px + var(--chat-keyboard-inset)); z-index: 71;
   width: min(336px, calc(100vw - 24px)); padding: 12px;
   border: 1px solid rgba(217,255,208,.25); border-radius: 18px;
   background: linear-gradient(155deg, rgba(13,58,25,.98), rgba(5,29,13,.98));
@@ -424,11 +439,16 @@ body {
 @media (max-width: 380px) {
   .chat-picker { max-height: 70vh; overflow-y: auto; }
 }
+/* On a phone the Usion host floats its lock button at 76.1% down the right edge;
+   open the phrase grid above it so its taps are not swallowed. */
+@media (pointer: coarse) {
+  .chat-picker { bottom: calc(max(calc(max(12px, var(--safe-bottom)) + 56px), calc(23.9dvh + 32px)) + var(--chat-keyboard-inset)); }
+}
 
 /* Country flag selection — the required second pre-match step. */
-.country-overlay { z-index: 120; padding: 12px; }
+.country-overlay { z-index: 120; padding: calc(12px + var(--safe-top)) calc(12px + var(--safe-right)) calc(12px + var(--safe-bottom)) calc(12px + var(--safe-left)); }
 .country-card {
-  width: min(430px, 96vw); max-height: min(760px, 94vh); padding: 18px;
+  width: min(430px, 96vw); max-height: min(760px, 94vh, 100%); padding: 18px;
   display: flex; flex-direction: column; overflow: hidden;
   border: 1px solid rgba(217,255,208,.24); border-radius: 24px;
   background:
@@ -482,7 +502,7 @@ body {
   .country-grid { grid-template-columns: repeat(3, minmax(0,1fr)); }
 }
 @media (max-height: 620px) {
-  .country-card { max-height: 96vh; padding: 12px; }
+  .country-card { max-height: min(96vh, 100%); padding: 12px; }
   .country-heading { margin-bottom: 8px; }
   .country-title { font-size: 18px; }
   .country-option { min-height: 74px; padding: 6px 3px; }
@@ -496,8 +516,8 @@ body {
 @media (max-width: 600px), (pointer: coarse) {
   .chat-toggle.custom-mode { visibility: hidden; pointer-events: none; }
   .chat-picker.custom-mode {
-    right: max(8px, env(safe-area-inset-right));
-    bottom: calc(max(8px, env(safe-area-inset-bottom)) + var(--chat-keyboard-inset));
+    right: max(8px, var(--safe-right));
+    bottom: calc(max(8px, var(--safe-bottom)) + var(--chat-keyboard-inset));
     width: min(440px, calc(100vw - 16px)); max-height: none; padding: 8px;
     overflow: visible; border-radius: 16px; transform-origin: bottom center;
   }

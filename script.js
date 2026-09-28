@@ -598,6 +598,18 @@ function sendQuickChat(value) {
   return true;
 }
 
+// Safe-area insets in px (custom properties holding env() don't resolve via
+// getPropertyValue, so measure a probe padded with them).
+function safeInsets() {
+  var p = document.createElement("div");
+  p.style.cssText = "position:fixed;visibility:hidden;pointer-events:none;padding:var(--safe-top) var(--safe-right) var(--safe-bottom) var(--safe-left)";
+  document.body.appendChild(p);
+  var c = getComputedStyle(p);
+  var r = { top: parseFloat(c.paddingTop) || 0, right: parseFloat(c.paddingRight) || 0, bottom: parseFloat(c.paddingBottom) || 0, left: parseFloat(c.paddingLeft) || 0 };
+  p.remove();
+  return r;
+}
+
 function showQuickChatBubble(player, value) {
   const phrase = normalizeChatMessage(value);
   if (!reactionLayer || !phrase) return;
@@ -613,7 +625,9 @@ function showQuickChatBubble(player, value) {
   const viewportWidth = window.innerWidth || document.documentElement.clientWidth;
   const left = rect.left + rect.width / 2 - width / 2;
   bubble.style.left = Math.max(8, Math.min(left, viewportWidth - width - 8)) + "px";
-  bubble.style.top = (rect.top > height + 14 ? rect.top - height - 8 : rect.bottom + 8) + "px";
+  // Above the panel only when that clears the notch (edge-to-edge Usion host).
+  const safeTop = safeInsets().top;
+  bubble.style.top = (rect.top - safeTop > height + 14 ? rect.top - height - 8 : rect.bottom + 8) + "px";
   requestAnimationFrame(function () { bubble.classList.add("pop"); });
   setTimeout(function () { bubble.classList.add("out"); }, 1900);
   setTimeout(function () { bubble.remove(); }, 2350);
@@ -734,8 +748,11 @@ function resizeCanvas() {
   // Calculate available height: viewport minus the UI above the field and padding
   var topbar = document.querySelector(".topbar");
   var turnInd = document.getElementById("turnIndicator");
+  // The notch and home indicator are off limits too: the container pads by them.
+  var safe = safeInsets();
   var usedHeight = (topbar ? topbar.offsetHeight : 0) +
-                   (turnInd ? turnInd.offsetHeight : 0) + 40; // 40px for margins/padding
+                   (turnInd ? turnInd.offsetHeight : 0) + 40 + // 40px for margins/padding
+                   safe.top + safe.bottom;
   var viewportH = window.visualViewport ? window.visualViewport.height : window.innerHeight;
   var availH = viewportH - usedHeight - touchInset * 2;
 
