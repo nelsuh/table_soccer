@@ -736,25 +736,13 @@ function resizeCanvas() {
   const contentW = container.clientWidth -
                    parseFloat(containerStyle.paddingLeft || 0) -
                    parseFloat(containerStyle.paddingRight || 0);
-  // Leave a small grab area around the pitch on phones. Without this inset the
-  // inline canvas width could consume the container padding too, putting edge
-  // players directly against the screen bezel where an outward drag is hard.
-  const compactScreen = window.matchMedia("(pointer: coarse)").matches ||
-                        window.innerWidth <= 600;
-  // A wider mobile margin gives the player enough physical room to pull back
-  // when a disk is against a sideline or corner.
-  const touchInset = compactScreen ? 32 : 0;
-  const maxW = Math.min(Math.max(contentW - touchInset * 2, 1), 400);
-  // Calculate available height: viewport minus the UI above the field and padding
-  var topbar = document.querySelector(".topbar");
-  var turnInd = document.getElementById("turnIndicator");
-  // The notch and home indicator are off limits too: the container pads by them.
-  var safe = safeInsets();
-  var usedHeight = (topbar ? topbar.offsetHeight : 0) +
-                   (turnInd ? turnInd.offsetHeight : 0) + 40 + // 40px for margins/padding
-                   safe.top + safe.bottom;
-  var viewportH = window.visualViewport ? window.visualViewport.height : window.innerHeight;
-  var availH = viewportH - usedHeight - touchInset * 2;
+  // The flex stage owns all space below the score and turn bar. Measure its
+  // actual content box so safe areas, translated labels and short screens fit
+  // without a hardcoded header allowance or a phone-sized desktop cap.
+  const maxW = Math.max(contentW, 1);
+  const availH = Math.max(container.clientHeight -
+                         parseFloat(containerStyle.paddingTop || 0) -
+                         parseFloat(containerStyle.paddingBottom || 0), 1);
 
   // Keep a fixed 2:3 aspect (matching the logical field) so circles never
   // distort and both clients share the same geometry. Fit within width and
@@ -782,6 +770,17 @@ function resizeCanvas() {
   render();
 }
 resizeCanvas();
+new ResizeObserver(resizeCanvas).observe(canvas.parentElement);
+
+// Keep browser gestures from interrupting play, including trackpad pinch zoom.
+document.addEventListener("gesturestart", function (event) { event.preventDefault(); }, { passive: false });
+document.addEventListener("gesturechange", function (event) { event.preventDefault(); }, { passive: false });
+document.addEventListener("wheel", function (event) {
+  if (event.ctrlKey || event.metaKey) event.preventDefault();
+}, { passive: false });
+document.addEventListener("dragstart", function (event) {
+  if (event.target.matches("img, canvas")) event.preventDefault();
+});
 window.addEventListener("resize", function () {
   if (customChatOpen) updateChatKeyboardInset();
   else resizeCanvas();

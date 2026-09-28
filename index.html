@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <title>Table Soccer</title>
 <link rel="stylesheet" href="https://usions.com/usion-design-system.css">
-<link rel="stylesheet" href="style.css?v=11">
+<link rel="stylesheet" href="style.css?v=12">
 </head>
 
 <body>
@@ -36,7 +36,9 @@
   <div class="turn-indicator" id="turnIndicator">Your Turn</div>
 
   <!-- Field Canvas -->
-  <canvas id="field"></canvas>
+  <div class="field-stage">
+    <canvas id="field" draggable="false"></canvas>
+  </div>
 
 </div>
 
@@ -172,7 +174,7 @@
 <!-- The Usion platform injects the SDK for hosted bundles; the explicit tag
      keeps the game working self-hosted / in the devkit too. -->
 <script src="https://usions.com/usion-sdk.js"></script>
-<script src="script.js?v=31"></script>
+<script src="script.js?v=32"></script>
 
 </body>
 </html>
