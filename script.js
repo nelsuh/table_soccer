@@ -52,6 +52,7 @@ const STR = {
     leftGrace: s => "Өрсөлдөгч гарлаа — дахин нэгдэхийг хүлээж байна… (" + s + "с)",
     quickChat: "Түргэн чат",
     customChat: "Өөрийн мессеж",
+    reactions: "Хариу үйлдэл",
     customChatPlaceholder: "Мессеж бичих…",
     backToQuickChat: "Түргэн чат руу буцах",
     send: "Илгээх",
@@ -98,6 +99,7 @@ const STR = {
     leftGrace: s => "Opponent left — waiting to rejoin… (" + s + "s)",
     quickChat: "Quick chat",
     customChat: "Custom",
+    reactions: "Reactions",
     customChatPlaceholder: "Type a message…",
     backToQuickChat: "Back to quick chat",
     send: "Send",
@@ -140,6 +142,7 @@ const QUICK_CHAT_PHRASES = [
   "GG!",
 ];
 const MAX_CHAT_LENGTH = 80;
+const CHAT_EMOJIS = ["😂", "😘", "😔", "😡", "😱", "😜", "😎", "🔥", "🎉", "😴", "👏", "👍"];
 const DISK_RADIUS = 18;
 const GOALKEEPER_RADIUS = 21;
 const GOALKEEPER_SPEED_MULTIPLIER = 0.85;
@@ -517,7 +520,26 @@ function normalizeChatMessage(value) {
   return message && message.length <= MAX_CHAT_LENGTH ? message : "";
 }
 
+// Tap-to-send emoji reactions. They ride the same quick_chat path as phrases
+// (rate limit, length cap, own bubble, picker close); a bubble whose text is
+// exactly one of these renders large.
+function buildChatEmojiRow() {
+  const row = document.getElementById("chatEmojis");
+  if (!row) return;
+  row.innerHTML = "";
+  row.setAttribute("aria-label", t("reactions"));
+  CHAT_EMOJIS.forEach((emoji) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "chat-emoji";
+    button.textContent = emoji;
+    button.addEventListener("click", () => sendQuickChat(emoji));
+    row.appendChild(button);
+  });
+}
+
 function buildQuickChatPicker() {
+  buildChatEmojiRow();
   if (!chatPhrases) return;
   chatPhrases.innerHTML = "";
   QUICK_CHAT_PHRASES.forEach(function (phrase) {
@@ -619,6 +641,7 @@ function showQuickChatBubble(player, value) {
   const bubble = document.createElement("div");
   bubble.className = "reaction-bubble player-" + player;
   bubble.textContent = phrase;
+  if (CHAT_EMOJIS.includes(phrase)) bubble.classList.add("is-emoji");
   reactionLayer.appendChild(bubble);
   const width = bubble.offsetWidth;
   const height = bubble.offsetHeight;
@@ -687,6 +710,8 @@ function applyLang(lang) {
   set("countryConfirm", "confirmCountry");
   if (customChatBack) customChatBack.setAttribute("aria-label", t("backToQuickChat"));
   if (chatToggle) chatToggle.setAttribute("aria-label", t("quickChat"));
+  const chatEmojiRow = document.getElementById("chatEmojis");
+  if (chatEmojiRow) chatEmojiRow.setAttribute("aria-label", t("reactions"));
   if (customChatInput) {
     customChatInput.placeholder = t("customChatPlaceholder");
     customChatInput.setAttribute("aria-label", t("customChatPlaceholder"));
